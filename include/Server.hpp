@@ -111,7 +111,11 @@ private:
     struct sockaddr_storage srcaddr;
     struct iovec iov[1];
     struct msghdr message;
+#ifndef __QNXNTO__
     char ctrl[CMSG_SPACE(sizeof(struct timeval))];
+#else /* !__QNXNTO__ */
+    char *ctrl;
+#endif /* __QNXNTO__ */
     struct cmsghdr *cmsg;
 #endif
 #if defined(HAVE_LINUX_FILTER_H) && defined(HAVE_AF_PACKET)

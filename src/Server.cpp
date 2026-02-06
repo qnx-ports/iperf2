@@ -95,6 +95,12 @@ Server::Server (thread_Settings *inSettings) {
     }
 #endif
     // Enable kernel level timestamping if available
+#ifdef __QNXNTO__
+#if HAVE_DECL_SO_TIMESTAMP
+    ctrl = new char[CMSG_SPACE(sizeof(struct timeval))];
+    FAIL_errno( ctrl == NULL, "No memory for ctrl\n", mSettings );
+#endif /* HAVE_DECL_SO_TIMESTAMP */
+#endif /* __QNXNTO__ */
     InitKernelTimeStamping();
     int sorcvtimer = 0;
     // sorcvtimer units microseconds convert to that
@@ -129,6 +135,12 @@ Server::~Server () {
 	myDropSocket = INVALID_SOCKET;
     }
 #endif
+#ifdef __QNXNTO__
+#if HAVE_DECL_SO_TIMESTAMP
+    delete [] ctrl;
+    ctrl = NULL;
+#endif /* HAVE_DECL_SO_TIMESTAMP */
+#endif /* __QNXNTO__ */
 }
 
 inline bool Server::InProgress () {
@@ -294,7 +306,11 @@ void Server::InitKernelTimeStamping () {
     message.msg_namelen=sizeof(srcaddr);
 
     message.msg_control = (char *) ctrl;
+#ifndef __QNXNTO__
     message.msg_controllen = sizeof(ctrl);
+#else /* !__QNXNTO__ */
+    message.msg_controllen = CMSG_SPACE(sizeof(struct timeval));
+#endif /* __QNXNTO__ */
 
     int timestampOn = 1;
     if (setsockopt(mSettings->mSock, SOL_SOCKET, SO_TIMESTAMP, &timestampOn, sizeof(timestampOn)) < 0) {
