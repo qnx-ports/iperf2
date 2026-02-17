@@ -88,7 +88,11 @@ public:
     void InitiateServer();
 
 private:
+#ifndef __QNXNTO__
     void WritePacketID( intmax_t );
+#else
+    void WritePacketID(intmax_t, struct UDP_datagram * mBuf_UDP = NULL);
+#endif
     void InitTrafficLoop(void);
     void FinishTrafficActions(void);
     void FinalUDPHandshake(void);
@@ -103,6 +107,10 @@ private:
     void RunTCP( void );
     // TCP version which supports rate limiting per -b
     void RunRateLimitedTCP( void );
+#ifdef __QNXNTO__
+    // UDP traffic in bursts using sendmmsg
+    void RunUDPBurst(void);
+#endif
     // UDP traffic with isochronous and vbr support
     void RunUDPIsochronous( void );
     // UDP plain
@@ -112,7 +120,9 @@ private:
     void HdrXchange(int flags);
 
     thread_Settings *mSettings;
+#ifndef __QNXNTO__
     char* mBuf;
+#endif
     Timestamp mEndTime;
     Timestamp lastPacketTime;
     Timestamp now;

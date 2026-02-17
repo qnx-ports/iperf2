@@ -864,6 +864,13 @@ void Listener::Accept( thread_Settings *server ) {
 		) {
 		break;
 	    }
+#ifdef __QNXNTO__
+	    if (server->mSock != INVALID_SOCKET) {
+			if (setsockopt(server->mSock, SOL_SOCKET, SO_RCVLOWAT, mSettings->recvlowat, sizeof(*mSettings->recvlowat)) != 0) {
+				WARN(1, "Failed setting recv low-water mark for the socket");
+			}
+	    }
+#endif
 	}
     }
     if (server->mSock != INVALID_SOCKET) {

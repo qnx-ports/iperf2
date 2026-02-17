@@ -190,7 +190,19 @@ int main( int argc, char **argv ) {
 	return 0;
     }
 
+#ifdef __QNXNTO__
+    int mbuflen = ext_gSettings->mBufLen;
+    if(isRcvMMsgs(ext_gSettings)) {
+       ext_gSettings->mBuf = new char[mbuflen * ext_gSettings->mmnum];
+       memset(ext_gSettings->mBuf, 0, mbuflen * ext_gSettings->mmnum);
+    }
+    else {
 
+    ext_gSettings->mBuf = new char[mbuflen];
+    memset(ext_gSettings->mBuf, 0, mbuflen);
+
+    }
+#endif
     switch (ext_gSettings->mThreadMode) {
     case kMode_Client :
 	if ( isDaemon( ext_gSettings ) ) {

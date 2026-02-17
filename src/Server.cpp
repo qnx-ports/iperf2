@@ -74,7 +74,9 @@
 
 Server::Server( thread_Settings *inSettings ) {
     mSettings = inSettings;
+#ifndef __QNXNTO__
     mBuf = NULL;
+#endif
 
 #if defined(HAVE_LINUX_FILTER_H) && defined(HAVE_AF_PACKET)
     if (isL2LengthCheck(mSettings)) {
@@ -84,10 +86,24 @@ Server::Server( thread_Settings *inSettings ) {
 	}
     }
 #endif
+#ifdef __QNXNTO__
+#if HAVE_DECL_SO_TIMESTAMP
+    ctrl = new char[CMSG_SPACE(sizeof(struct timeval))];
+    FAIL_errno( ctrl == NULL, "No memory for ctrl\n", mSettings );
+#endif
+#endif /* __QNXNTO__ */
     // initialize buffer, length checking done by the Listener
+
+#ifndef __QNXNTO__
     mBuf = new char[((mSettings->mBufLen > SIZEOF_MAXHDRMSG) ? mSettings->mBufLen : SIZEOF_MAXHDRMSG)];
     FAIL_errno( mBuf == NULL, "No memory for buffer\n", mSettings );
+#endif
     SockAddr_Ifrname(mSettings);
+#ifdef __QNXNTO__
+	mBuf_curr = NULL;
+	initialized_mm = false;
+	nextindex = 0;
+#endif
 }
 
 /* -------------------------------------------------------------------
@@ -96,8 +112,24 @@ Server::Server( thread_Settings *inSettings ) {
 
 Server::~Server() {
     if ( mSettings->mSock != INVALID_SOCKET ) {
-        int rc = close( mSettings->mSock );
-        WARN_errno( rc == SOCKET_ERROR, "server close" );
+
+#ifdef __QNXNTO__
+		/*
+		 *  In case of UDP, packet(s) can be lost or delayed.
+		 *  Your issue is occurred when UDP packet(s) transfer is delayed.
+		 *  If a delayed packet from 1st test is received while 2nd
+		 *  test is running, iperf consider it as a packet for 3rd test
+		 *  and start new thread for 3rd test.
+		 *  To prevent it, just don't close socket so as new socket is not opened
+		 */
+		if(!isUDP(mSettings))
+		{
+#endif
+			int rc = close( mSettings->mSock );
+			WARN_errno( rc == SOCKET_ERROR, "server close" );
+#ifdef __QNXNTO__
+		}
+#endif
         mSettings->mSock = INVALID_SOCKET;
     }
 
@@ -108,7 +140,15 @@ Server::~Server() {
         mSettings->mSockDrop = INVALID_SOCKET;
     }
 #endif
+#ifndef __QNXNTO__
     DELETE_ARRAY( mBuf );
+#endif
+#ifdef __QNXNTO__
+#if HAVE_DECL_SO_TIMESTAMP
+	delete [] ctrl;
+	ctrl = NULL;
+#endif /* HAVE_DECL_SO_TIMESTAMP */
+#endif /* __QNXNTO__ */
 }
 
 bool Server::InProgress (void) {
@@ -122,6 +162,70 @@ bool Server::InProgress (void) {
 #endif
     return true;
 }
+#ifdef __QNXNTO__
+
+ssize_t Server::recvmulti(int s, void *buforig,  size_t len, int flags ) {
+	int index = 0;
+	struct timespec *pts=NULL,ts;
+
+	if(isRcvMMsgsWaitAll(mSettings)) {
+		flags |= MSG_WAITALL;
+	} else {
+		flags |= MSG_WAITFORONE;
+	}
+
+	if( isRcvMMsgsTime(mSettings)) {
+		ts.tv_sec=mSettings->wait_nsec/1000000000;
+		ts.tv_nsec=mSettings->wait_nsec%1000000000;
+		pts = &ts;
+	}
+
+	if( false ==  initialized_mm) {
+		msghdr = new struct mmsghdr[mSettings->mmnum];
+		if(NULL==msghdr) {
+			printf("%s \n",strerror(errno));
+			exit(1);
+		}
+		iovmm = new struct iovec[mSettings->mmnum];
+		if(NULL == iovmm) {
+			printf("%s \n",strerror(errno));
+			exit(1);
+		}
+		initialized_mm=true;
+	}
+
+	if (init_buf_idx)
+		nextindex = 0;
+
+	index = nextindex;
+	if (index == 0) { //prepare new call
+		for (int a = 0; a < mSettings->mmnum; a++ ){
+			iovmm[a].iov_base = (char *)buforig + (a * mSettings->mBufLen);
+			iovmm[a].iov_len = mSettings->mBufLen;
+
+			msghdr[a].msg_hdr.msg_name = &srcaddr;
+			msghdr[a].msg_hdr.msg_namelen = sizeof(srcaddr);
+			msghdr[a].msg_hdr.msg_iov = &iovmm[a];
+			msghdr[a].msg_hdr.msg_iovlen = 1;
+			msghdr[a].msg_hdr.msg_control = NULL;
+			msghdr[a].msg_hdr.msg_controllen = 0;
+		}
+		count = recvmmsg(s, msghdr, mSettings->mmnum, flags, pts);
+		if (count < 1) {
+			return -1;
+		}
+	}
+
+	mBuf_curr = reinterpret_cast<char *>(iovmm[index].iov_base);
+
+	if (index == (count - 1)) 
+		nextindex = 0;
+	else 
+		nextindex = index + 1;
+
+	return msghdr[index].msg_len;
+}
+#endif
 
 /* -------------------------------------------------------------------
  * Receive TCP data from the (connected) socket.
@@ -147,7 +251,11 @@ void Server::RunTCP( void ) {
 	    time1 = time2;
 	}
 	if (tokens >= 0.0) {
+#ifndef __QNXNTO__
 	    currLen = recv( mSettings->mSock, mBuf, mSettings->mBufLen, 0 );
+#else
+	    currLen = recv( mSettings->mSock, mSettings->mBuf, mSettings->mBufLen, 0 );
+#endif
 	    now.setnow();
 	    reportstruct->packetTime.tv_sec = now.getSecs();
 	    reportstruct->packetTime.tv_usec = now.getUsecs();
@@ -198,21 +306,42 @@ void Server::RunTCP( void ) {
 
 void Server::InitTimeStamping (void) {
 #if HAVE_DECL_SO_TIMESTAMP
-    iov[0].iov_base=mBuf;
-    iov[0].iov_len=mSettings->mBufLen;
+    #ifdef __QNXNTO__
+        if(!isRcvMMsgs(mSettings)) {
+            iov[0].iov_base=mSettings->mBuf;
+            iov[0].iov_len=mSettings->mBufLen;
 
-    message.msg_iov=iov;
-    message.msg_iovlen=1;
-    message.msg_name=&srcaddr;
-    message.msg_namelen=sizeof(srcaddr);
+            message.msg_iov=iov;
+            message.msg_iovlen=1;
+            message.msg_name=&srcaddr;
+            message.msg_namelen=sizeof(srcaddr);
 
-    message.msg_control = (char *) ctrl;
-    message.msg_controllen = sizeof(ctrl);
+            message.msg_control = (char *) ctrl;
+            message.msg_controllen = CMSG_SPACE(sizeof(struct timeval));
 
-    int timestampOn = 1;
-    if (setsockopt(mSettings->mSock, SOL_SOCKET, SO_TIMESTAMP, (int *) &timestampOn, sizeof(timestampOn)) < 0) {
-	WARN_errno( mSettings->mSock == SO_TIMESTAMP, "socket" );
-    }
+            int timestampOn = 1;
+            if (setsockopt(mSettings->mSock, SOL_SOCKET, SO_TIMESTAMP, (int *) &timestampOn, sizeof(timestampOn)) < 0) {
+            WARN_errno( mSettings->mSock == SO_TIMESTAMP, "socket" );
+            }
+        }
+    #else /* !__QNXNTO__ */
+
+        iov[0].iov_base=mBuf;
+        iov[0].iov_len=mSettings->mBufLen;
+
+        message.msg_iov=iov;
+        message.msg_iovlen=1;
+        message.msg_name=&srcaddr;
+        message.msg_namelen=sizeof(srcaddr);
+
+        message.msg_control = (char *) ctrl;
+        message.msg_controllen = sizeof(ctrl);
+
+        int timestampOn = 1;
+        if (setsockopt(mSettings->mSock, SOL_SOCKET, SO_TIMESTAMP, (int *) &timestampOn, sizeof(timestampOn)) < 0) {
+        WARN_errno( mSettings->mSock == SO_TIMESTAMP, "socket" );
+        }
+    #endif /* __QNXNTO__ */
 #endif
 }
 
@@ -280,14 +409,29 @@ void Server::InitTrafficLoop (void) {
 	    mSettings->reporthdr->report.clientStartTime.tv_usec = ntohl(buf[2]);
 	}
     }
+
+#ifdef __QNXNTO__
+	if (isUDP(mSettings)) {
+		init_buf_idx=true;
+	}
+#endif
 }
 
 int Server::ReadWithRxTimestamp (int *readerr) {
     long currLen;
     int tsdone = 0;
-
+#ifdef __QNXNTO__
+	static int retryCnt=0;
+#endif
 #if HAVE_DECL_SO_TIMESTAMP
+#ifdef __QNXNTO__
+	if(isRcvMMsgs(mSettings)) {
+		currLen = recvmulti(mSettings->mSock, mSettings->mBuf, mSettings->mBufLen, mSettings->recvflags );
+		init_buf_idx = false;
+	} else {
+#endif
     cmsg = (struct cmsghdr *) &ctrl;
+
     currLen = recvmsg( mSettings->mSock, &message, mSettings->recvflags );
     if (currLen > 0) {
 	if (cmsg->cmsg_level == SOL_SOCKET &&
@@ -297,8 +441,15 @@ int Server::ReadWithRxTimestamp (int *readerr) {
 	    tsdone = 1;
 	}
     }
-#else
-    currLen = recv( mSettings->mSock, mBuf, mSettings->mBufLen, mSettings->recvflags);
+#ifdef __QNXNTO__
+	}
+#endif
+#else // HAVE_DECL_SO_TIMESTAMP
+    #ifdef __QNXNTO__
+        currLen = recv( mSettings->mSock, mSettings->mBuf, mSettings->mBufLen, mSettings->recvflags);
+    #else
+        currLen = recv( mSettings->mSock, mBuf, mSettings->mBufLen, mSettings->recvflags);
+    #endif
 #endif
     if (currLen <=0) {
 	// Socket read timeout or read error
@@ -315,21 +466,48 @@ int Server::ReadWithRxTimestamp (int *readerr) {
 	    WARN_errno( currLen, "recvmsg");
 	    *readerr = 1;
 	}
+#ifdef __QNXNTO__
+		else if ( errno == EAGAIN ) {
+			retryCnt++;
+			if(retryCnt == 5) {
+				WARN_errno( currLen, "recvmsg after 10 retryi");
+				*readerr = 1;
+				retryCnt = 0;
+			}
+		}
+#endif
 	currLen= 0;
     }
+#ifdef __QNXNTO__
+	else {
+		retryCnt = 0;
+	}
+#endif
 
     if (!tsdone) {
 	now.setnow();
 	reportstruct->packetTime.tv_sec = now.getSecs();
 	reportstruct->packetTime.tv_usec = now.getUsecs();
     }
+
     return currLen;
 }
 
 // Returns true if the client has indicated this is the final packet
 bool Server::ReadPacketID (void) {
     bool terminate = false;
+#ifndef __QNXNTO__
     struct UDP_datagram* mBuf_UDP  = (struct UDP_datagram*) (mBuf + mSettings->l4payloadoffset);
+#else
+    struct UDP_datagram* mBuf_UDP  = NULL;
+
+    if( isRcvMMsgs(mSettings) && mBuf_curr ) {
+        mBuf_UDP = reinterpret_cast<struct UDP_datagram*>(mBuf_curr + mSettings->l4payloadoffset);
+    }
+    else {
+        mBuf_UDP = reinterpret_cast<struct UDP_datagram*>(mSettings->mBuf + mSettings->l4payloadoffset);
+    }
+#endif
 
     // terminate when datagram begins with negative index
     // the datagram ID should be correct, just negated
@@ -363,10 +541,17 @@ bool Server::ReadPacketID (void) {
 
 void Server::L2_processing (void) {
 #if defined(HAVE_LINUX_FILTER_H) && defined(HAVE_AF_PACKET)
+#ifndef __QNXNTO__
     eth_hdr = (struct ether_header *) mBuf;
     ip_hdr = (struct iphdr *) (mBuf + sizeof(struct ether_header));
     // L4 offest is set by the listener and depends upon IPv4 or IPv6
     udp_hdr = (struct udphdr *) (mBuf + mSettings->l4offset);
+#else
+    eth_hdr = (struct ether_header *) mSettings->mBuf;
+    ip_hdr = (struct iphdr *) (mSettings->mBuf + sizeof(struct ether_header));
+    // L4 offest is set by the listener and depends upon IPv4 or IPv6
+    udp_hdr = (struct udphdr *) (mSettings->mBuf + mSettings->l4offset);
+#endif
     // Read the packet to get the UDP length
     int udplen = ntohs(udp_hdr->len);
     //
@@ -418,7 +603,11 @@ int Server::L2_quintuple_filter(void) {
     }
 
     // check the L2 ethertype
+#ifndef __QNXNTO__
     struct ether_header *l2hdr = (struct ether_header *)mBuf;
+#else
+    struct ether_header *l2hdr = (struct ether_header *)mSettings->mBuf;
+#endif
 
     if (!isIPV6(mSettings)) {
 	if (ntohs(l2hdr->ether_type) != ETHERTYPE_IP)
@@ -429,11 +618,19 @@ int Server::L2_quintuple_filter(void) {
     }
     // check the ip src/dst
     const uint32_t *data;
+#ifndef __QNXNTO__
     udp_hdr = (struct udphdr *) (mBuf + mSettings->l4offset);
+#else
+    udp_hdr = (struct udphdr *) (mSettings->mBuf + mSettings->l4offset);
+#endif
 
     // Check plain old v4 using v4 addr structs
     if (l->sa_family == AF_INET) {
+#ifndef __QNXNTO__
 	data = (const uint32_t *) (mBuf + sizeof(struct ether_header) + IPV4SRCOFFSET);
+#else
+	data = (const uint32_t *) (mSettings->mBuf + sizeof(struct ether_header) + IPV4SRCOFFSET);
+#endif
 	if (((struct sockaddr_in *)(p))->sin_addr.s_addr != *data++)
 	    return -1;
 	if (((struct sockaddr_in *)(l))->sin_addr.s_addr != *data)
@@ -449,7 +646,11 @@ int Server::L2_quintuple_filter(void) {
 	struct in6_addr *v6local = SockAddr_get_in6_addr(&mSettings->local);
 	if (isIPV6(mSettings)) {
 	    int i;
+#ifndef __QNXNTO__
 	    data = (const uint32_t *) (mBuf + sizeof(struct ether_header) + IPV6SRCOFFSET);
+#else
+	    data = (const uint32_t *) (mSettings->mBuf + sizeof(struct ether_header) + IPV6SRCOFFSET);
+#endif
 	    // check for v6 src/dst address match
 	    for (i = 0; i < 4; i++) {
 		if (v6peer->s6_addr32[i] != *data++)
@@ -460,7 +661,11 @@ int Server::L2_quintuple_filter(void) {
 		    return -1;
 	    }
 	} else { // v4 addr in v6 family struct
+#ifndef __QNXNTO__
 	    data = (const uint32_t *) (mBuf + sizeof(struct ether_header) + IPV4SRCOFFSET);
+#else
+	    data = (const uint32_t *) (mSettings->mBuf + sizeof(struct ether_header) + IPV4SRCOFFSET);
+#endif
 	    if (v6peer->s6_addr32[3] != *data++)
 		return -1;
 	    if (v6peer->s6_addr32[3] != *data)
@@ -486,7 +691,11 @@ void Server::Isoch_processing (int rxlen) {
 	reportstruct->remaining = 0;
 	reportstruct->frameID = 0;
     } else {
+#ifndef __QNXNTO__
 	struct client_hdr_udp_isoch_tests *testhdr = (client_hdr_udp_isoch_tests *)(mBuf + sizeof(client_hdr_v1) + sizeof(UDP_datagram));
+#else
+	struct client_hdr_udp_isoch_tests *testhdr = (client_hdr_udp_isoch_tests *)(mSettings->mBuf + sizeof(client_hdr_v1) + sizeof(UDP_datagram));
+#endif
 	struct UDP_isoch_payload* mBuf_isoch = &(testhdr->isoch);
 	reportstruct->isochStartTime.tv_sec = ntohl(mBuf_isoch->start_tv_sec);
 	reportstruct->isochStartTime.tv_usec = ntohl(mBuf_isoch->start_tv_usec);
@@ -592,7 +801,11 @@ void Server::write_UDP_AckFIN( ) {
         UDP_datagram *UDP_Hdr;
         server_hdr *hdr;
 
+#ifndef __QNXNTO__
         UDP_Hdr = (UDP_datagram*) mBuf;
+#else
+        UDP_Hdr = (UDP_datagram*) mSettings->mBuf;
+#endif
         if (mSettings->mBufLen > (int) (sizeof(UDP_datagram) + sizeof(server_hdr))) {
 	    int flags = (!isEnhanced(mSettings) ? HEADER_VERSION1 : (HEADER_VERSION1 | HEADER_EXTEND));
 #ifdef HAVE_INT64_T
@@ -645,7 +858,11 @@ void Server::write_UDP_AckFIN( ) {
 	//
 	write(((mSettings->mSockDrop > 0 ) ? mSettings->mSockDrop : mSettings->mSock), mBuf, mSettings->mBufLen);
 #else
+#ifndef __QNXNTO__
 	write(mSettings->mSock, mBuf, mSettings->mBufLen);
+#else
+	write(mSettings->mSock, mSettings->mBuf, mSettings->mBufLen);
+#endif
 #endif
         // wait until the socket is readable, or our timeout expires
         FD_SET( mSettings->mSock, &readSet );
@@ -660,7 +877,11 @@ void Server::write_UDP_AckFIN( ) {
             return;
         } else {
             // socket ready to read
+#ifndef __QNXNTO__
             rc = read( mSettings->mSock, mBuf, mSettings->mBufLen );
+#else
+            rc = read( mSettings->mSock, mSettings->mBuf, mSettings->mBufLen );
+#endif
             WARN_errno( rc < 0, "read" );
             if ( rc <= 0 ) {
                 // Connection closed or errored

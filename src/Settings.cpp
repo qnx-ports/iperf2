@@ -85,6 +85,14 @@ static int burstipg = 0;
 static int burstipg_set = 0;
 static int isochronous = 0;
 #endif
+#ifdef __QNXNTO__
+static int sendmmsgs = 0;
+static int recvmmsgs = 0;          // number of mmsg
+static int recvmmsgs_waitall = 0;  // wait for one (0) default / wait for all(1)
+static int recvmmsgs_time = 0;     // wait time in msec. , default (0) means forever
+static int recvlowat_flag = 0;
+static int recvlowat = 1; //the recv low-water mark value
+#endif
 
 void Settings_Interpret( char option, const char *optarg, thread_Settings *mExtSettings );
 // apply compound settings after the command line has been fully parsed
@@ -156,6 +164,13 @@ const struct option long_options[] =
 #ifdef HAVE_ISOCHRONOUS
 {"ipg", required_argument, &burstipg, 1},
 {"isochronous", optional_argument, &isochronous, 1},
+#endif
+#ifdef __QNXNTO__
+{"send-mmsg", optional_argument, &sendmmsgs, 1},
+{"recv-mmsg", optional_argument, &recvmmsgs, 1},
+{"recv-mmsg-wait-all", no_argument, &recvmmsgs_waitall, 1},
+{"recv-mmsg-time", optional_argument, &recvmmsgs_time, 1},
+{"recvlowat", optional_argument, &recvlowat_flag, 1},
 #endif
 #ifdef WIN32
 {"reverse", no_argument, &reversetest, 1},
@@ -275,6 +290,12 @@ void Settings_Initialize( thread_Settings *main ) {
     //main->mDomain     = kMode_IPv4;    // -V,
     //main->mSuggestWin = false;         // -W,  Suggest the window size.
 
+#ifdef __QNXNTO__
+      main->mmnum = 1;
+      main->wait_mode = WaitForOne;
+      main->wait_nsec = -1;
+      main->recvlowat = &recvlowat; //default value
+#endif
 } // end Settings
 
 void Settings_Copy( thread_Settings *from, thread_Settings **into ) {
@@ -320,6 +341,18 @@ void Settings_Copy( thread_Settings *from, thread_Settings **into ) {
     (*into)->runNow = NULL;
 #if defined(HAVE_LINUX_FILTER_H) && defined(HAVE_AF_PACKET)
     (*into)->mSockDrop = INVALID_SOCKET;
+#endif
+#if __QNXNTO__
+#define MINMBUFALLOCSIZE 1024
+    int mbuflen = (from->mBufLen > MINMBUFALLOCSIZE) ? from->mBufLen : MINMBUFALLOCSIZE; // defined in payloads.h
+    if(isRcvMMsgs(from)) {
+        (*into)->mBuf = new char[mbuflen * from->mmnum];
+        memset((*into)->mBuf, 0, mbuflen * from->mmnum);
+    }
+    else {
+        (*into)->mBuf = new char[mbuflen];
+        memset((*into)->mBuf, 0, mbuflen);
+    }
 #endif
 }
 
@@ -799,6 +832,60 @@ void Settings_Interpret( char option, const char *optarg, thread_Settings *mExtS
 		fprintf( stderr, "WARNING: The --fq-rate option is not supported\n");
 #endif
 	    }
+#ifdef __QNXNTO__
+		if ( sendmmsgs ) {
+			sendmmsgs=0;
+			setSndMMsgs(mExtSettings);
+			if (optarg) {
+				mExtSettings->mmnum = byte_atoi(optarg);
+				if( mExtSettings->mmnum > 1024)
+					mExtSettings->mmnum = 1024;
+
+				if( mExtSettings->mmnum <= 0)
+					mExtSettings->mmnum = 1; 
+			}
+		}
+		if ( recvmmsgs ) {// --recv-mmsg-num
+			recvmmsgs = 0;
+			setRcvMMsgs(mExtSettings);
+
+			if (optarg) {
+				mExtSettings->mmnum = byte_atoi(optarg);
+				if( mExtSettings->mmnum > 1024)
+					mExtSettings->mmnum = 1024;
+				if( mExtSettings->mmnum <= 0)
+					mExtSettings->mmnum = 1;
+			}
+		}
+		if ( recvmmsgs_waitall ) {// --recv-mmsg-num
+			recvmmsgs_waitall=0;
+			setRcvMMsgsWaitAll(mExtSettings);
+			mExtSettings->wait_mode = WaitAll;
+         }
+		if ( recvmmsgs_time ) {// --recv-mmsg-num
+			recvmmsgs_time=0;
+			setRcvMMsgsTime(mExtSettings);
+
+			if (optarg) {
+				mExtSettings->wait_nsec = byte_atoi(optarg) * 1000000; // input unit is ms
+			} else {
+				mExtSettings->wait_nsec = 1000000;
+			}
+		}
+		if ( recvlowat_flag ) {
+			recvlowat_flag = 0;
+			setRcvLowat(mExtSettings);
+
+			if (optarg) {
+				recvlowat = byte_atoi(optarg);
+				if (recvlowat <= 0) {
+					mExtSettings->recvlowat = &mExtSettings->mBufLen; //use the value of the "mExtSettings->mBufLen"
+				}
+			} else {
+				mExtSettings->recvlowat = &mExtSettings->mBufLen; //use the value of the "mExtSettings->mBufLen"
+			}
+		}
+#endif
 
 #ifdef HAVE_ISOCHRONOUS
 	    if (isochronous) {
@@ -856,6 +943,12 @@ void Settings_ModalOptions( thread_Settings *mExtSettings ) {
 	    } else {
 		mExtSettings->mBufLen = kDefault_UDPBufLen;
 	    }
+
+#ifdef __QNXNTO__
+        if (isSndMMsgs(mExtSettings)) {
+            mExtSettings->mBurstSize = mExtSettings->mmnum * mExtSettings->mBufLen;
+        }
+#endif
 	} else {
 	    mExtSettings->mBufLen = kDefault_TCPBufLen;
 	}

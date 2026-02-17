@@ -92,14 +92,27 @@
 
 void delay_loop(unsigned long usec)
 {
-#ifdef HAVE_KALMAN
+#ifdef HAVE_CLOCK_NANOSLEEP
+  {
+    struct timespec res;
+    res.tv_sec = usec/MILLION;
+    res.tv_nsec = (usec * 1000) % BILLION;
+  #ifndef WIN32
+    clock_nanosleep(CLOCK_MONOTONIC, 0, &res, NULL);
+  #else
+    clock_nanosleep(0, 0, &res, NULL);
+  #endif
+  }
+#else
+  #ifdef HAVE_KALMAN
     delay_kalman(usec);
-#else
-#ifdef HAVE_NANOSLEEP
+  #else
+  #ifdef HAVE_NANOSLEEP
     delay_nanosleep(usec);
-#else
+  #else
     delay_busyloop(usec);
-#endif
+  #endif
+  #endif
 #endif
 }
 

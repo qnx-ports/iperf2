@@ -115,6 +115,15 @@ extern const char wait_server_threads[];
 extern const char client_udp_isochronous[];
 
 extern const char client_fq_pacing[];
+#ifdef __QNXNTO__
+extern const char send_mm_conf[];
+
+extern const char recv_mm_conf[];
+
+extern const char recv_mm_conf_no_timeout[];
+
+extern const char recv_lowat_conf[];
+#endif
 /* -------------------------------------------------------------------
  * Legacy reports
  * ------------------------------------------------------------------- */

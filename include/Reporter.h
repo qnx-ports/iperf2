@@ -301,6 +301,13 @@ typedef struct ReporterData {
 #endif
     double TxSyncInterval;
     unsigned int FQPacingRate;
+#ifdef __QNXNTO__
+    enum WaitMode wait_mode;
+    int mmnum;
+    int wait_nsec;
+    int* recvlowat; //point to either the setting value or 'mBufLen' (-l)
+#endif
+
 } ReporterData;
 
 typedef struct MultiHeader {
@@ -355,8 +362,35 @@ extern char buffer[SNBUFFERSIZE]; // Buffer for printing
 
 #define rMillion 1000000
 
+#ifndef __QNXNTO__
 #define TimeDifference( left, right ) (left.tv_sec  - right.tv_sec) +   \
         (left.tv_usec - right.tv_usec) / ((double) rMillion)
+#else
+/*
+ * Types are tricky!
+ * This needs to return a double. Subtraction needs to happen in int types
+ * to avoid a loss of precision. Subtraction also needs to make sure that
+ * it does not result in a signed negative value becoming an unsigned large
+ * positive value either through type promotion or through subtraction of
+ * unsigned types. tv_sec is unsigned, tv_usec is signed.
+ * Too many pitfalls for a macro, make it an inline function. There's
+ * some extra casts in here to be extra clear as to what is going on.
+ * Relying on type promotion rules is the road to bugs as shown above.
+ */
+static inline double TimeDifference (struct timeval left, struct timeval right)
+{
+    double ret;
+
+    if (left.tv_sec >= right.tv_sec) {
+        ret = (double)(left.tv_sec - right.tv_sec);
+    } else {
+        ret = 0.0 - (double)(right.tv_sec - left.tv_sec);
+    }
+    ret += ((double)(left.tv_usec - right.tv_usec)) / (double)rMillion;
+
+    return ret;
+}
+#endif
 
 #define TimeAdd( left, right )  do {                                    \
                                     left.tv_usec += right.tv_usec;      \

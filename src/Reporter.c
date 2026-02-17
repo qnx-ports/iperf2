@@ -724,6 +724,12 @@ again:
         if ( ReportRoot != NULL ) {
             ReportHeader *temp = ReportRoot;
             //Condition_Unlock ( ReportCond );
+#ifdef __QNXNTO__
+            temp->report.mmnum = thread->mmnum;
+            temp->report.wait_mode = thread->wait_mode;
+            temp->report.wait_nsec = thread->wait_nsec;
+            temp->report.recvlowat = thread->recvlowat;
+#endif
             if ( reporter_process_report ( temp ) ) {
                 // This section allows for more reports to be added while
                 // the reporter is processing reports without needing to

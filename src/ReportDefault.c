@@ -80,7 +80,11 @@ void reporter_printstats( Transfer_Info *stats ) {
         bytesxfered = (double) stats->TotalLen;
     }
     byte_snprintf( &buffer[sizeof(buffer)/2], sizeof(buffer)/2,
+#ifdef __QNXNTO__
+                   (stats->endTime - stats->startTime) ? (bytesxfered / (stats->endTime - stats->startTime)) : 0,
+#else
                    (bytesxfered / (stats->endTime - stats->startTime)),
+#endif
 		   stats->mFormat);
 
     // TCP reports
@@ -187,7 +191,11 @@ void reporter_printstats( Transfer_Info *stats ) {
 			    stats->startTime, stats->endTime,
 			    buffer, &buffer[sizeof(buffer)/2],
 			    stats->jitter*1000.0, stats->cntError, stats->cntDatagrams,
+#ifdef __QNXNTO__
+			    stats->cntDatagrams ? (100.0 * stats->cntError) / stats->cntDatagrams : 0,
+#else
 			    (100.0 * stats->cntError) / stats->cntDatagrams,
+#endif
 			    (stats->IPGcnt / stats->IPGsum));
 		} else {
 #ifdef HAVE_ISOCHRONOUS
@@ -197,7 +205,11 @@ void reporter_printstats( Transfer_Info *stats ) {
 				stats->startTime, stats->endTime,
 				buffer, &buffer[sizeof(buffer)/2],
 				stats->jitter*1e3, stats->cntError, stats->cntDatagrams,
+#ifdef __QNXNTO__
+				stats->cntDatagrams ? (100.0 * stats->cntError) / stats->cntDatagrams : 0,
+#else
 				(100.0 * stats->cntError) / stats->cntDatagrams,
+#endif
 				(meantransit * 1e3),
 				stats->transit.minTransit*1e3,
 				stats->transit.maxTransit*1e3,
@@ -213,7 +225,11 @@ void reporter_printstats( Transfer_Info *stats ) {
 			    stats->startTime, stats->endTime,
 			    buffer, &buffer[sizeof(buffer)/2],
 			    stats->jitter*1000.0, stats->cntError, stats->cntDatagrams,
+#ifdef __QNXNTO__
+			    stats->cntDatagrams ? (100.0 * stats->cntError) / stats->cntDatagrams : 0,
+#else
 			    (100.0 * stats->cntError) / stats->cntDatagrams,
+#endif
 			    (meantransit * 1e3),
 			    stats->transit.minTransit*1e3,
 			    stats->transit.maxTransit*1e3,
@@ -243,7 +259,11 @@ void reporter_printstats( Transfer_Info *stats ) {
 		    stats->startTime, stats->endTime,
 		    buffer, &buffer[sizeof(buffer)/2],
 		    stats->jitter*1000.0, stats->cntError, stats->cntDatagrams,
+#ifdef __QNXNTO__
+		    stats->cntDatagrams ? (100.0 * stats->cntError) / stats->cntDatagrams : 0);
+#else
 		    (100.0 * stats->cntError) / stats->cntDatagrams);
+#endif
 	}
 	if ( stats->cntOutofOrder > 0 ) {
 	    printf( report_outoforder,
@@ -312,7 +332,11 @@ void reporter_multistats( Transfer_Info *stats ) {
                 stats->startTime, stats->endTime,
                 buffer, &buffer[sizeof(buffer)/2],
                 stats->jitter*1000.0, stats->cntError, stats->cntDatagrams,
+#ifdef __QNXNTO__
+		    stats->cntDatagrams ? (100.0 * stats->cntError) / stats->cntDatagrams : 0);
+#else
 		   (100.0 * stats->cntError) / stats->cntDatagrams);
+#endif
 	} else {
         // TCP Reporting
 	    printf(report_sum_bw_format,
@@ -326,7 +350,11 @@ void reporter_multistats( Transfer_Info *stats ) {
 		    stats->startTime, stats->endTime,
 		    buffer, &buffer[sizeof(buffer)/2],
 		    stats->cntError, stats->cntDatagrams,
+#ifdef __QNXNTO__
+		    stats->cntDatagrams ? (100.0 * stats->cntError) / stats->cntDatagrams : 0,
+#else
 		    (100.0 * stats->cntError) / stats->cntDatagrams,
+#endif
 		    (stats->IPGcnt ? (stats->IPGcnt / stats->IPGsum) : 0.0));
 	} else if (stats->mUDP) {
 	    // UDP Enhanced Reporting
@@ -447,6 +475,20 @@ void reporter_reportsettings( ReporterData *data ) {
 	    } else {
 		printf(server_datagram_size, data->mBufLen);
 	    }
+#ifdef __QNXNTO__
+		if (isSndMMsgs(data)) {
+		printf(send_mm_conf, data->mmnum);
+		}
+
+	    if (isRcvMMsgs(data)) {
+		if(isRcvMMsgsTime(data)) {
+		printf(recv_mm_conf, data->mmnum,data->wait_mode,data->wait_nsec/1000000);
+		}
+		else {
+		printf(recv_mm_conf_no_timeout, data->mmnum,data->wait_mode);
+		}
+		}
+#endif
 	    if ( SockAddr_isMulticast( &data->connection.peer ) ) {
 		printf( multicast_ttl, data->info.mTTL);
 	    }
@@ -455,6 +497,16 @@ void reporter_reportsettings( ReporterData *data ) {
 			   toupper( (int)data->info.mFormat));
 	    printf("%s: %s\n", ((data->mThreadMode == kMode_Client) ?
 				client_write_size : server_read_size), buffer);
+
+#ifdef __QNXNTO__
+		if (kMode_Listener == data->mThreadMode)
+		{
+			byte_snprintf( buffer, sizeof(buffer), *data->recvlowat,
+				   toupper( (int)data->info.mFormat));
+			printf("%s: %s\n", recv_lowat_conf, buffer);
+		}
+#endif
+
 	}
     }
     byte_snprintf( buffer, sizeof(buffer), win,

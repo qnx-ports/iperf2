@@ -80,13 +80,18 @@ public:
 
 private:
     thread_Settings *mSettings;
+#ifndef __QNXNTO__
     char* mBuf;
+#endif
     Timestamp mEndTime;
     Timestamp now;
     ReportStruct *reportstruct;
 
     void InitTimeStamping (void);
     void InitTrafficLoop (void);
+#ifdef __QNXNTO__
+    ssize_t recvmulti(int, void *,  size_t, int );
+#endif
     int ReadWithRxTimestamp (int *readerr);
     bool ReadPacketID (void);
     void L2_processing (void);
@@ -95,6 +100,7 @@ private:
     bool InProgress(void);
     Timestamp connect_done;
 
+#ifndef __QNXNTO__
 #if HAVE_DECL_SO_TIMESTAMP
     // Structures needed for recvmsg
     // Use to get kernel timestamps of packets
@@ -104,10 +110,29 @@ private:
     char ctrl[CMSG_SPACE(sizeof(struct timeval))];
     struct cmsghdr *cmsg;
 #endif
+#else /* __QNXNTO__ */
+    // Structures needed for recvmsg
+    // Use to get kernel timestamps of packets
+    struct sockaddr_storage srcaddr;
+    struct iovec iov[1];
+    struct msghdr message;
+    char *ctrl;
+    struct cmsghdr *cmsg;
+#endif
+
 #if defined(HAVE_LINUX_FILTER_H) && defined(HAVE_AF_PACKET)
     struct ether_header *eth_hdr;
     struct iphdr *ip_hdr;
     struct udphdr *udp_hdr;
+#endif
+#ifdef __QNXNTO__
+    char* mBuf_curr;
+    bool init_buf_idx;
+    bool initialized_mm;
+    int nextindex;
+    struct mmsghdr *msghdr;
+    struct iovec *iovmm;
+    int count;
 #endif
 }; // end class Server
 

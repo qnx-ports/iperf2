@@ -78,7 +78,9 @@ const int    kBytes_to_Bits = 8;
 
 Client::Client( thread_Settings *inSettings ) {
     mSettings = inSettings;
+#ifndef __QNXNTO__
     mBuf = NULL;
+#endif
     double ct = -1.0;
 
     if (isCompat(inSettings) && isPeerVerDetect(inSettings)) {
@@ -100,9 +102,14 @@ Client::Client( thread_Settings *inSettings ) {
 	}
     }
     // initialize buffer
+#ifndef __QNXNTO__
     mBuf = new char[((mSettings->mBufLen > MAXUDPBUF) ? mSettings->mBufLen : MAXUDPBUF)];
     FAIL_errno( mBuf == NULL, "No memory for buffer\n", mSettings );
     pattern( mBuf, ((mSettings->mBufLen > MAXUDPBUF) ? mSettings->mBufLen : MAXUDPBUF));
+#else
+    pattern( mSettings->mBuf, mSettings->mBufLen );
+#endif
+
     if ( isFileInput( mSettings ) ) {
         if ( !isSTDIN( mSettings ) )
             Extractor_Initialize( mSettings->mFileName, mSettings->mBufLen, mSettings );
@@ -171,7 +178,9 @@ Client::~Client() {
         WARN_errno( rc == SOCKET_ERROR, "close" );
         mSettings->mSock = INVALID_SOCKET;
     }
+#ifndef __QNXNTO__
     DELETE_ARRAY( mBuf );
+#endif
     DELETE_PTR(reportstruct);
 } // end ~Client
 
@@ -308,7 +317,11 @@ void Client::InitTrafficLoop (void) {
     }
 
     lastPacketTime.setnow();
+#ifndef __QNXNTO__
     readAt = mBuf;
+#else
+    readAt = mSettings->mBuf;
+#endif
 }
 
 
@@ -333,7 +346,11 @@ void Client::Run( void ) {
     if (isUDP(mSettings)) {
 	// Preset any UDP fields in the mBuf, a non-zero
 	// return indicates some udptests were set
+#ifndef __QNXNTO__
 	int udptests = Settings_GenerateClientHdr(mSettings, (client_hdr *) (mBuf + sizeof(struct UDP_datagram)));
+#else
+	int udptests = Settings_GenerateClientHdr(mSettings, (client_hdr *) (mSettings->mBuf + sizeof(struct UDP_datagram)));
+#endif
 
 	if ( isFileInput( mSettings ) ) {
 	    // Due to the UDP timestamps etc, included
@@ -356,6 +373,10 @@ void Client::Run( void ) {
 	// Launch the approprate UDP traffic loop
 	if (isIsochronous(mSettings)) {
 	    RunUDPIsochronous();
+#ifdef __QNXNTO__
+	} else if (isSndMMsgs(mSettings)) {
+	    RunUDPBurst();
+#endif
 	} else {
 	    RunUDP();
 	}
@@ -379,9 +400,17 @@ void Client::RunTCP( void ) {
     while (InProgress()) {
         // perform write
         if (!isModeTime(mSettings)) {
+#ifndef __QNXNTO__
 	    currLen = write( mSettings->mSock, mBuf, (mSettings->mAmount < (unsigned) mSettings->mBufLen) ? mSettings->mAmount : mSettings->mBufLen);
+#else
+	    currLen = write( mSettings->mSock, mSettings->mBuf, (mSettings->mAmount < (unsigned) mSettings->mBufLen) ? mSettings->mAmount : mSettings->mBufLen);
+#endif
 	} else {
+#ifndef __QNXNTO__
 	    currLen = write( mSettings->mSock, mBuf, mSettings->mBufLen);
+#else
+	    currLen = write( mSettings->mSock, mSettings->mBuf, mSettings->mBufLen);
+#endif
 	}
         if ( currLen < 0 ) {
 	    if (NONFATALTCPWRITERR(errno)) {
@@ -457,9 +486,17 @@ void Client::RunRateLimitedTCP ( void ) {
 	if (tokens >= 0.0) {
 	    // perform write
 	    if (!isModeTime(mSettings)) {
+#ifndef __QNXNTO__
 	        currLen = write( mSettings->mSock, mBuf, (mSettings->mAmount < (unsigned) mSettings->mBufLen) ? mSettings->mAmount : mSettings->mBufLen);
+#else
+	        currLen = write( mSettings->mSock, mSettings->mBuf, (mSettings->mAmount < (unsigned) mSettings->mBufLen) ? mSettings->mAmount : mSettings->mBufLen);
+#endif
 	    } else {
+#ifndef __QNXNTO__
 	        currLen = write( mSettings->mSock, mBuf, mSettings->mBufLen);
+#else
+	        currLen = write( mSettings->mSock, mSettings->mBuf, mSettings->mBufLen);
+#endif
 	    }
 	    if ( currLen < 0 ) {
 	        if (NONFATALTCPWRITERR(errno)) {
@@ -508,8 +545,204 @@ void Client::RunRateLimitedTCP ( void ) {
 /*
  * UDP send loop
  */
+#ifdef __QNXNTO__
+void Client::RunUDPBurst(void) {
+	int currMsg=0;
+	int msg_len;
+	struct iovec *iov;
+	struct mmsghdr *mmsg;
+	char*  mBuf;
+	struct UDP_datagram* mBuf_UDP = NULL;
+	int vlen;
+	double delay_target;
+	double delay = 0;
+	double adjust = 0;
+	int i=0;
+
+    // compute delay target in units of nanoseconds
+    if (mSettings->mUDPRateUnits == kRate_BW) {
+	// compute delay for bandwidth restriction, constrained to [0,1] seconds
+	delay_target = (double) ( mSettings->mBufLen * ((kSecs_to_nsecs * kBytes_to_Bits)
+							/ mSettings->mUDPRate) );
+    } else {
+	delay_target = 1e9 / mSettings->mUDPRate;
+    }
+    if ( delay_target < 0  ||
+	 delay_target > 1.0 * kSecs_to_nsecs ) {
+	fprintf( stderr, warn_delay_large, delay_target / kSecs_to_nsecs );
+	delay_target = 1.0 * kSecs_to_nsecs;
+    }
+	delay_target *= mSettings->mmnum;
+
+	double variance = mSettings->mVariance;
+
+	// Size of one message
+	if (!isModeTime(mSettings)) {
+		msg_len = (mSettings->mAmount < static_cast<unsigned>(mSettings->mBufLen)) ? mSettings->mAmount : mSettings->mBufLen;
+	} else {
+		msg_len = mSettings->mBufLen;
+	}
+	//msg_len = mSettings->mBufLen;
+	// Number of messages in one burst
+	vlen = mSettings->mmnum;
+
+	// Allocate temporary mBuf with enough space for all messages in a burst
+	mBuf = (char*) malloc( vlen * msg_len);
+	if (mBuf == NULL) {
+		FAIL_errno(errno, "Out of memory", mSettings);
+	}
+
+	for(i=0;i<vlen;i++)
+		memcpy(mBuf + i*msg_len, mSettings->mBuf, mSettings->mBufLen);
+
+	// Allocate temporary mBuf with enough space for all messages in a burst
+	iov = (struct iovec *) calloc(vlen, sizeof(struct iovec));
+	if (iov == NULL) {
+		free(mBuf);
+		FAIL_errno(errno, "Out of memory", mSettings);
+	}
+
+	// Allocate buffer for multi message header array
+	mmsg = (struct mmsghdr *) calloc(vlen, sizeof(struct mmsghdr));
+	if (mmsg == NULL) {
+		free(iov);
+		free(mBuf);
+		FAIL_errno(errno, "Out of memory", mSettings);
+	}
+
+	while (InProgress()) {
+		// Test case: drop 17 packets and send 2 out-of-order:
+		// sequence 51, 52, 70, 53, 54, 71, 72
+		//switch(datagramID) {
+		//  case 53: datagramID = 70; break;
+		//  case 71: datagramID = 53; break;
+		//  case 55: datagramID = 71; break;
+		//  default: break;
+		//}
+
+		for (int m = 0; m < vlen; m++) {
+
+			iov[m].iov_base = mBuf + (m * msg_len);
+			iov[m].iov_len  = msg_len;
+
+			mmsg[m].msg_hdr.msg_name = NULL;
+			mmsg[m].msg_hdr.msg_namelen = 0;
+			mmsg[m].msg_hdr.msg_iov = &iov[m];
+			mmsg[m].msg_hdr.msg_iovlen = 1;
+			mmsg[m].msg_hdr.msg_control = NULL;
+			mmsg[m].msg_hdr.msg_controllen = 0;
+
+			now.setnow();
+			reportstruct->packetTime.tv_sec = now.getSecs();
+			reportstruct->packetTime.tv_usec = now.getUsecs();
+			reportstruct->sentTime = reportstruct->packetTime;
+			if (isVaryLoad(mSettings) && mSettings->mUDPRateUnits == kRate_BW) {
+				static Timestamp time3;
+				if (now.subSec(time3) >= VARYLOAD_PERIOD) {
+					long var_rate = lognormal(mSettings->mUDPRate,variance);
+					if (var_rate < 0)
+						var_rate = 0;
+					delay_target = (mSettings->mBufLen * ((kSecs_to_nsecs * kBytes_to_Bits) / var_rate));
+
+					time3 = now;
+				}
+			}
+			// store datagram ID into buffer
+			mBuf_UDP = reinterpret_cast<struct UDP_datagram*>(mBuf + (m*msg_len));
+			WritePacketID(reportstruct->packetID++, mBuf_UDP);
+			mBuf_UDP->tv_sec  = htonl(reportstruct->packetTime.tv_sec);
+			mBuf_UDP->tv_usec = htonl(reportstruct->packetTime.tv_usec);
+		}
+
+		// Adjustment for the running delay
+		// o measure how long the last loop iteration took
+		// o calculate the delay adjust
+		//   - If write succeeded, adjust = target IPG - the loop time
+		//   - If write failed, adjust = the loop time
+		// o then adjust the overall running delay
+		// Note: adjust units are nanoseconds,
+		//       packet timestamps are microseconds
+		adjust = delay_target + (1000.0 * lastPacketTime.subUsec(reportstruct->packetTime));
+		//printf("%s:%d delay(%f), adjust(%f), delay_target(%f)\n",__func__,__LINE__,delay,adjust,delay_target);
+
+		lastPacketTime.set(reportstruct->packetTime.tv_sec, reportstruct->packetTime.tv_usec);
+		// Since linux nanosleep/busyloop can exceed delay
+		// there are two possible equilibriums
+		//  1)  Try to perserve inter packet gap
+		//  2)  Try to perserve requested transmit rate
+		// The latter seems preferred, hence use a running delay
+		// that spans the life of the thread and constantly adjust.
+		// A negative delay means the iperf app is behind.
+		delay += adjust;
+		//	printf("%s:%d delay(%f), adjust(%f), delay_lower_bounds(%f)\n",__func__,__LINE__,delay,adjust, delay_lower_bounds);
+		// Don't let delay grow unbounded
+		if (delay < delay_lower_bounds) {
+			delay = delay_target;
+		}
+
+		reportstruct->errwrite = WriteNoErr;
+		reportstruct->emptyreport = 0;
+
+		int msgSent=0;
+
+		do {
+			// perform write
+			currMsg = sendmmsg(mSettings->mSock, &mmsg[msgSent], vlen - msgSent, 0);
+
+			if (currMsg < 0) {
+				reportstruct->packetID -= (vlen - currMsg);
+
+				if(errno == ECONNREFUSED) {
+					WARN_errno(1, "sendmmsg - connection refused");
+					goto err;
+				}
+				if (FATALUDPWRITERR(errno)) {
+					reportstruct->errwrite = WriteErrFatal;
+					WARN_errno(1, "write");
+					goto err;
+				} else {
+					reportstruct->errwrite = WriteErrAccount;
+					currMsg = 0;
+				}
+				reportstruct->emptyreport = 1;
+			}
+			// report packets
+			for (int m = msgSent; m < msgSent + currMsg; m++) {
+				reportstruct->packetLen = static_cast<unsigned long>(msg_len);
+				//reportstruct->prevPacketTime = myReport->info.ts.prevpacketTime;
+				//myReportPacket();
+				//reportstruct->packetID++;
+				//myReport->info.ts.prevpacketTime = reportstruct->packetTime;
+				ReportPacket( mSettings->reporthdr, reportstruct );
+			}
+
+			msgSent += currMsg;
+		} while( msgSent < vlen );
+#if 1
+		// Insert delay here only if the running delay is greater than 100 usec,
+		// otherwise don't delay and immediately continue with the next tx.
+		if (delay >= 1000) {
+			// Convert from nanoseconds to microseconds
+			// and invoke the microsecond delay
+			delay_loop(static_cast<unsigned long>(delay / 1000));
+		}
+#endif
+	}
+
+err:
+	FinishTrafficActions();
+
+	free(mmsg);
+	free(iov);
+	free(mBuf);
+}
+#endif
 void Client::RunUDP( void ) {
+#ifndef __QNXNTO__
     struct UDP_datagram* mBuf_UDP = (struct UDP_datagram*) mBuf;
+#else
+    struct UDP_datagram* mBuf_UDP = (struct UDP_datagram*) mSettings->mBuf;
+#endif
     int currLen;
 
     double delay_target = 0;
@@ -596,10 +829,18 @@ void Client::RunUDP( void ) {
 	reportstruct->emptyreport = 0;
 
 	// perform write
-	if (!isModeTime(mSettings)) {
-	    currLen = write( mSettings->mSock, mBuf, (mSettings->mAmount < (unsigned) mSettings->mBufLen) ? mSettings->mAmount : mSettings->mBufLen);
-	} else {
-	    currLen = write( mSettings->mSock, mBuf, mSettings->mBufLen);
+		if (!isModeTime(mSettings)) {
+#ifndef __QNXNTO__
+		    currLen = write( mSettings->mSock, mBuf, (mSettings->mAmount < (unsigned) mSettings->mBufLen) ? mSettings->mAmount : mSettings->mBufLen);
+#else
+		    currLen = write( mSettings->mSock, mSettings->mBuf, (mSettings->mAmount < (unsigned) mSettings->mBufLen) ? mSettings->mAmount : mSettings->mBufLen);
+#endif
+		} else {
+#ifndef __QNXNTO__
+		    currLen = write( mSettings->mSock, mBuf, mSettings->mBufLen);
+#else
+		    currLen = write( mSettings->mSock, mSettings->mBuf, mSettings->mBufLen);
+#endif
 	}
 	if ( currLen < 0 ) {
 	    reportstruct->packetID--;
@@ -646,9 +887,17 @@ void Client::RunUDPIsochronous (void) {
     FAIL_errno(1, "UDP isochronous not supported, recompile after using config --enable-isochronous\n", mSettings );
     return;
 #else
+#ifndef __QNXNTO__
     struct UDP_datagram* mBuf_UDP = (struct UDP_datagram*) mBuf;
+#else
+    struct UDP_datagram* mBuf_UDP = (struct UDP_datagram*) mSettings->mBuf;
+#endif
     // skip over the UDP datagram (seq no, timestamp) to reach the isoch fields
+#ifndef __QNXNTO__
     struct client_hdr_udp_isoch_tests *testhdr = (client_hdr_udp_isoch_tests *)(mBuf + sizeof(client_hdr_v1) + sizeof(UDP_datagram));
+#else
+    struct client_hdr_udp_isoch_tests *testhdr = (client_hdr_udp_isoch_tests *)(mSettings->mBuf + sizeof(client_hdr_v1) + sizeof(UDP_datagram));
+#endif
     struct UDP_isoch_payload* mBuf_isoch = &(testhdr->isoch);
 
     Isochronous::FrameCounter *fc = new Isochronous::FrameCounter(mSettings->mFPS);
@@ -734,11 +983,19 @@ void Client::RunUDPIsochronous (void) {
 	    if (!isModeTime(mSettings) && (mSettings->mAmount < (unsigned) mSettings->mBufLen)) {
 	        mBuf_isoch->remaining = htonl(mSettings->mAmount);
 		reportstruct->remaining=mSettings->mAmount;
+#ifndef __QNXNTO__
 	        currLen = write(mSettings->mSock, mBuf, mSettings->mAmount);
+#else
+	        currLen = write(mSettings->mSock, mSettings->mBuf, mSettings->mAmount);
+#endif
 	    } else {
 	        mBuf_isoch->remaining = htonl(bytecnt);
 		reportstruct->remaining=bytecnt;
+#ifndef __QNXNTO__
 	        currLen = write(mSettings->mSock, mBuf, (bytecnt < mSettings->mBufLen) ? bytecnt : mSettings->mBufLen);
+#else
+	        currLen = write(mSettings->mSock, mSettings->mBuf, (bytecnt < mSettings->mBufLen) ? bytecnt : mSettings->mBufLen);
+#endif
 	    }
 
 	    if ( currLen < 0 ) {
@@ -793,10 +1050,15 @@ void Client::RunUDPIsochronous (void) {
 }
 // end RunUDPIsoch
 
-
-
+#ifndef __QNXNTO__
 void Client::WritePacketID (intmax_t packetID) {
     struct UDP_datagram * mBuf_UDP = (struct UDP_datagram *) mBuf;
+#else
+void Client::WritePacketID (intmax_t packetID, struct UDP_datagram * mBuf_UDP) {
+    if (mBuf_UDP == NULL) {
+        mBuf_UDP = (struct UDP_datagram *)mSettings->mBuf;
+    }
+#endif
     // store datagram ID into buffer
 #ifdef HAVE_INT64_T
     // Pack signed 64bit packetID into unsigned 32bit id1 + unsigned
@@ -876,7 +1138,11 @@ void Client::FinishTrafficActions(void) {
  * acknowledgement datagram is received.
  * ------------------------------------------------------------------- */
 void Client::FinalUDPHandshake(void) {
+#ifndef __QNXNTO__
     struct UDP_datagram * mBuf_UDP = (struct UDP_datagram *) mBuf;
+#else
+    struct UDP_datagram * mBuf_UDP = (struct UDP_datagram *) mSettings->mBuf;
+#endif
     // send a final terminating datagram
     // Don't count in the mTotalLen. The server counts this one,
     // but didn't count our first datagram, so we're even now.
@@ -888,7 +1154,11 @@ void Client::FinalUDPHandshake(void) {
     if ( isMulticast( mSettings ) ) {
 	// Multicast threads only sends one negative sequence number packet
 	// and doesn't wait for a server ack
+#ifndef __QNXNTO__
 	write(mSettings->mSock, mBuf, mSettings->mBufLen);
+#else
+	write(mSettings->mSock, mSettings->mBuf, mSettings->mBufLen);
+#endif
     } else {
 	// Unicast send and wait for acks
 	write_UDP_FIN();
@@ -905,7 +1175,11 @@ void Client::write_UDP_FIN (void) {
         count++;
 
         // write data
+#ifndef __QNXNTO__
         write( mSettings->mSock, mBuf, mSettings->mBufLen );
+#else
+        write( mSettings->mSock, mSettings->mBuf, mSettings->mBufLen );
+#endif
 	// decrement the packet count
 	//
 	// Note: a negative packet id is used to tell the server
@@ -933,12 +1207,20 @@ void Client::write_UDP_FIN (void) {
             // socket ready to read, this packet size
 	    // is set by the server.  Assume it's large enough
 	    // to contain the final server packet
+#ifndef __QNXNTO__
             rc = read( mSettings->mSock, mBuf, MAXUDPBUF);
+#else
+            rc = read( mSettings->mSock, mSettings->mBuf, MAXUDPBUF);
+#endif
 	    WARN_errno( rc < 0, "read" );
 	    if ( rc < 0 ) {
                 break;
             } else if ( rc >= (int) (sizeof(UDP_datagram) + sizeof(server_hdr)) ) {
+#ifndef __QNXNTO__
                 ReportServerUDP( mSettings, (server_hdr*) ((UDP_datagram*)mBuf + 1) );
+#else
+                ReportServerUDP( mSettings, (server_hdr*) ((UDP_datagram*)mSettings->mBuf + 1) );
+#endif
             }
             return;
         }
@@ -954,11 +1236,19 @@ void Client::InitiateServer() {
 	int flags = 0;
         client_hdr* temp_hdr;
         if ( isUDP( mSettings ) ) {
+#ifndef __QNXNTO__
             UDP_datagram *UDPhdr = (UDP_datagram *)mBuf;
+#else
+            UDP_datagram *UDPhdr = (UDP_datagram *)mSettings->mBuf;
+#endif
 	    // skip over the UDP datagram (seq no, timestamp)
             temp_hdr = (client_hdr*)(UDPhdr + 1);
         } else {
+#ifndef __QNXNTO__
             temp_hdr = (client_hdr*)mBuf;
+#else
+            temp_hdr = (client_hdr*)mSettings->mBuf;
+#endif
         }
 	flags = Settings_GenerateClientHdr( mSettings, temp_hdr );
 
@@ -990,7 +1280,11 @@ void Client::HdrXchange(int flags) {
 	// Run compatability detection and test info exchange for tests that require it
 	int optflag;
 	if (isUDP(mSettings)) {
+#ifndef __QNXNTO__
 	    struct UDP_datagram* mBuf_UDP = (struct UDP_datagram*) mBuf;
+#else
+	    struct UDP_datagram* mBuf_UDP = (struct UDP_datagram*) mSettings->mBuf;
+#endif
 	    Timestamp now;
 	    len = mSettings->mBufLen;
 	    // UDP header message must be mBufLen so server/Listener will read it
@@ -1009,7 +1303,11 @@ void Client::HdrXchange(int flags) {
 	    if(setsockopt( mSettings->mSock, IPPROTO_TCP, TCP_NODELAY, (char *)&optflag, sizeof(int)) < 0 )
 		WARN_errno(0, "tcpnodelay" );
 	}
+#ifndef __QNXNTO__
 	currLen = send( mSettings->mSock, mBuf, len, 0 );
+#else
+	currLen = send( mSettings->mSock, mSettings->mBuf, len, 0 );
+#endif
 	if ( currLen < 0 ) {
 	    WARN_errno( currLen < 0, "send_hdr_v2" );
 	} else {
@@ -1076,7 +1374,11 @@ void Client::HdrXchange(int flags) {
 		fprintf( stderr, warn_len_too_small_peer_exchange, "Client", mSettings->mBufLen, sizeof(client_hdr_v1));
 	    }
 	    // Send TCP version1 header message now
+#ifndef __QNXNTO__
 	    currLen = send( mSettings->mSock, mBuf, sizeof(client_hdr_v1), 0 );
+#else
+	    currLen = send( mSettings->mSock, mSettings->mBuf, sizeof(client_hdr_v1), 0 );
+#endif
 	    WARN_errno( currLen < 0, "send_hdr_v1" );
 	}
     }

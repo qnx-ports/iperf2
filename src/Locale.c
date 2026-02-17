@@ -94,8 +94,14 @@ Client/Server:\n\
 Server specific:\n\
   -s, --server             run in server mode\n\
   -t, --time      #        time in seconds to listen for new connections as well as to receive traffic (default not set)\n\
-      --udp-histogram #,#  enable UDP latency histogram(s) with bin width and count, e.g. 1,1000=1(ms),1000(bins)\n\
-  -B, --bind <ip>[%<dev>]  bind to multicast address and optional device\n\
+      --udp-histogram #,#  enable UDP latency histogram(s) with bin width and count, e.g. 1,1000=1(ms),1000(bins)\n"
+#ifdef __QNXNTO__
+"      --recv-mmsg #        use recvmmsg() API\n\
+      --recv-mmsg-wait-all use MSG_WAITALL instead of MSG_WAITFORONE\n\
+      --recv-mmsg-time #   set timeout to wait for messages to be received in recvmmsg() API\n\
+      --recvlowat #        set the tcp socket receive low-water mark\n"
+#endif
+"  -B, --bind <ip>[%<dev>]  bind to multicast address and optional device\n\
   -H, --ssm-host <ip>      set the SSM source, use with -B for (S,G) \n\
   -U, --single_udp         run in single threaded UDP mode\n\
   -D, --daemon             run the server as a daemon\n"
@@ -113,6 +119,9 @@ Client specific:\n\
 #ifdef HAVE_ISOCHRONOUS
 "      --ipg                set the the interpacket gap (milliseconds) for packets within an isochronous frame\n\
       --isochronous <frames-per-second>:<mean>,<stddev> send traffic in bursts (frames - emulate video traffic)\n"
+#endif
+#ifdef __QNXNTO__
+"      --send-mmsg #        use sendmmsg() API\n"
 #endif
 "  -n, --num       #[kmgKMG]    number of bytes to transmit (instead of -t)\n\
   -r, --tradeoff           Do a bidirectional test individually\n\
@@ -225,6 +234,20 @@ const char client_udp_isochronous[] =
 
 const char client_fq_pacing [] =
 "fair-queue socket pacing set to %s/s\n";
+
+#ifdef __QNXNTO__
+const char send_mm_conf[] =
+"Num. of send mmsg array: %d\n";
+
+const char recv_mm_conf[] =
+"Num. of recv mmsg array: %d, wait-all:%d, wait time:%dms\n";
+
+const char recv_mm_conf_no_timeout[] =
+"Num. of recv mmsg array: %d, wait-all:%d, wait time: NULL\n";
+
+const char recv_lowat_conf[] =
+"Recv low-water mark";
+#endif
 
 /* -------------------------------------------------------------------
  * Legacy reports

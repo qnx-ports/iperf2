@@ -107,6 +107,13 @@ typedef enum RateUnits {
     kRate_PPS
 } RateUnits;
 
+#ifdef __QNXNTO__
+enum WaitMode {
+    WaitForOne = 0,
+    WaitAll
+};
+#endif
+
 #include "Reporter.h"
 
 /*
@@ -225,6 +232,14 @@ typedef struct thread_Settings {
 #ifdef HAVE_CLOCK_NANOSLEEP
     struct timespec txstart;
 #endif
+#ifdef __QNXNTO__
+    char*  mBuf;
+    uint32_t mBurstSize; //number of bytes in a burst
+    enum WaitMode wait_mode;
+    int mmnum;
+    int wait_nsec;
+    int* recvlowat; //point to either the setting value or 'mBufLen' (-l)
+#endif
 } thread_Settings;
 
 /*
@@ -284,6 +299,13 @@ typedef struct thread_Settings {
 #define FLAG_FQPACING       0x00001000
 #define FLAG_TRIPTIME       0x00002000
 
+#ifdef __QNXNTO__
+#define FLAG_SNDMMSGS       0x10000000
+#define FLAG_RCVMMSGS       0x20000000
+#define FLAG_RCVMMSGSWAITALL 0x40000000
+#define FLAG_RCVMMSGSTIME   0x80000000
+#define FLAG_RCVLOWAT       0x100000000
+#endif
 
 #define isBuflenSet(settings)      ((settings->flags & FLAG_BUFLENSET) != 0)
 #define isCompat(settings)         ((settings->flags & FLAG_COMPAT) != 0)
@@ -326,6 +348,13 @@ typedef struct thread_Settings {
 #define isVaryLoad(settings)       ((settings->flags_extend & FLAG_VARYLOAD) != 0)
 #define isFQPacing(settings)       ((settings->flags_extend & FLAG_FQPACING) != 0)
 #define isTripTime(settings)       ((settings->flags_extend & FLAG_TRIPTIME) != 0)
+#ifdef __QNXNTO__
+#define isSndMMsgs(settings)          ((settings->flags_extend & FLAG_SNDMMSGS) != 0)
+#define isRcvMMsgs(settings)          ((settings->flags_extend & FLAG_RCVMMSGS) != 0)
+#define isRcvMMsgsWaitAll(settings)   ((settings->flags_extend & FLAG_RCVMMSGSWAITALL) != 0)
+#define isRcvMMsgsTime(settings)      ((settings->flags_extend & FLAG_RCVMMSGSTIME) != 0)
+#define isRcvLowat(settings)      ((settings->flags_extend & FLAG_RCVLOWAT) != 0)
+#endif
 
 #define setBuflenSet(settings)     settings->flags |= FLAG_BUFLENSET
 #define setCompat(settings)        settings->flags |= FLAG_COMPAT
@@ -366,6 +395,13 @@ typedef struct thread_Settings {
 #define setVaryLoad(settings)      settings->flags_extend |= FLAG_VARYLOAD
 #define setFQPacing(settings)      settings->flags_extend |= FLAG_FQPACING
 #define setTripTime(settings)      settings->flags_extend |= FLAG_TRIPTIME
+#ifdef __QNXNTO__
+#define setSndMMsgs(settings)      settings->flags_extend |= FLAG_SNDMMSGS
+#define setRcvMMsgs(settings)      settings->flags_extend |= FLAG_RCVMMSGS
+#define setRcvMMsgsWaitAll(settings)      settings->flags_extend |= FLAG_RCVMMSGSWAITALL
+#define setRcvMMsgsTime(settings)      settings->flags_extend |= FLAG_RCVMMSGSTIME
+#define setRcvLowat(settings)      settings->flags_extend |= FLAG_RCVLOWAT
+#endif
 
 #define unsetBuflenSet(settings)   settings->flags &= ~FLAG_BUFLENSET
 #define unsetCompat(settings)      settings->flags &= ~FLAG_COMPAT
