@@ -172,11 +172,11 @@ uint32_t udpchecksum(const void *l3pdu, const void *l4pdu, int udplen, int v6) {
     int i;
 
     const struct udphdr *udp_hdr = (const struct udphdr *)l4pdu;
-#ifndef __QNXNTO__
-    if (!udp_hdr->check) {
-#else
+#ifdef __QNX__
     if (!udp_hdr->uh_sum) {
-#endif
+#else
+    if (!udp_hdr->check) {
+#endif /* __QNX__ */
 	if (v6)
 	    // v6 requires checksums
 	    return -1;

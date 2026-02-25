@@ -120,8 +120,9 @@ static inline void _print_stats_common (struct TransferInfo *stats) {
     if (stats->ts.iEnd < SMALLEST_INTERVAL_SEC) {
         stats->cntBytes = 0;
     }
-    byte_snprintf(outbufferext, sizeof(outbufferext), (double)stats->cntBytes / (stats->ts.iEnd - stats->ts.iStart), \
-		  stats->common->Format);
+    byte_snprintf(outbufferext, sizeof(outbufferext),
+                  (stats->ts.iEnd == stats->ts.iStart ? 0 : (double)stats->cntBytes / (stats->ts.iEnd - stats->ts.iStart)),
+                  stats->common->Format);
     outbuffer[sizeof(outbuffer)-1]='\0';
     outbufferext[sizeof(outbufferext)-1]='\0';
 }
@@ -467,7 +468,7 @@ void udp_output_read (struct TransferInfo *stats) {
 	    stats->ts.iStart, stats->ts.iEnd,
 	    outbuffer, outbufferext,
 	    stats->jitter*1000.0, stats->cntError, stats->cntDatagrams,
-	    (100.0 * stats->cntError) / stats->cntDatagrams);
+	    (stats->cntDatagrams ? (100.0 * stats->cntError) / stats->cntDatagrams : 0.0));
     _output_outoforder(stats);
     fflush(stdout);
 }
@@ -489,7 +490,7 @@ void udp_output_read_enhanced (struct TransferInfo *stats) {
 		   stats->ts.iStart, stats->ts.iEnd,
 		   outbuffer, outbufferext,
 		   stats->jitter*1000.0, stats->cntError, stats->cntDatagrams,
-		   (100.0 * stats->cntError) / stats->cntDatagrams,
+		   (stats->cntDatagrams ? (100.0 * stats->cntError) / stats->cntDatagrams : 0.0),
 		   (stats->cntIPG / stats->IPGsum));
 	} else {
 	    double meantransit = (stats->transit.cntTransit > 0) ? (stats->transit.sumTransit / stats->transit.cntTransit) : 0;
@@ -498,7 +499,7 @@ void udp_output_read_enhanced (struct TransferInfo *stats) {
 		   stats->ts.iStart, stats->ts.iEnd,
 		   outbuffer, outbufferext,
 		   stats->jitter*1000.0, stats->cntError, stats->cntDatagrams,
-		   (100.0 * stats->cntError) / stats->cntDatagrams,
+		   (stats->cntDatagrams ? (100.0 * stats->cntError) / stats->cntDatagrams : 0.0),
 		   (meantransit * 1e3),
 		   stats->transit.minTransit*1e3,
 		   stats->transit.maxTransit*1e3,
@@ -531,7 +532,7 @@ void udp_output_read_enhanced_triptime (struct TransferInfo *stats) {
 		   stats->ts.iStart, stats->ts.iEnd,
 		   outbuffer, outbufferext,
 		   stats->jitter*1000.0, stats->cntError, stats->cntDatagrams,
-		   (100.0 * stats->cntError) / stats->cntDatagrams,
+		   (stats->cntDatagrams ? (100.0 * stats->cntError) / stats->cntDatagrams : 0.0),
 		   (stats->cntIPG / stats->IPGsum));
 	} else {
 	    double meantransit = (stats->transit.cntTransit > 0) ? (stats->transit.sumTransit / stats->transit.cntTransit) : 0;
@@ -543,7 +544,7 @@ void udp_output_read_enhanced_triptime (struct TransferInfo *stats) {
 		   stats->ts.iStart, stats->ts.iEnd,
 		   outbuffer, outbufferext,
 		   stats->jitter*1000.0, stats->cntError, stats->cntDatagrams,
-		   (100.0 * stats->cntError) / stats->cntDatagrams,
+		   (stats->cntDatagrams ? (100.0 * stats->cntError) / stats->cntDatagrams : 0.0),
 		   (meantransit * 1e3),
 		   stats->transit.minTransit*1e3,
 		   stats->transit.maxTransit*1e3,
@@ -580,7 +581,7 @@ void udp_output_read_enhanced_triptime_isoch (struct TransferInfo *stats) {
 		   stats->ts.iStart, stats->ts.iEnd,
 		   outbuffer, outbufferext,
 		   stats->jitter*1000.0, stats->cntError, stats->cntDatagrams,
-		   (100.0 * stats->cntError) / stats->cntDatagrams,
+		   (stats->cntDatagrams ? (100.0 * stats->cntError) / stats->cntDatagrams : 0.0),
 		   (stats->cntIPG / stats->IPGsum));
 	} else {
 	    double meantransit = (stats->transit.cntTransit > 0) ? (stats->transit.sumTransit / stats->transit.cntTransit) : 0;
@@ -592,7 +593,7 @@ void udp_output_read_enhanced_triptime_isoch (struct TransferInfo *stats) {
 		   stats->ts.iStart, stats->ts.iEnd,
 		   outbuffer, outbufferext,
 		   stats->jitter*1e3, stats->cntError, stats->cntDatagrams,
-		   (100.0 * stats->cntError) / stats->cntDatagrams,
+		   (stats->cntDatagrams ? (100.0 * stats->cntError) / stats->cntDatagrams : 0.0),
 		   (meantransit * 1e3),
 		   stats->transit.minTransit*1e3,
 		   stats->transit.maxTransit*1e3,
@@ -653,7 +654,7 @@ void udp_output_sum_read (struct TransferInfo *stats) {
 	   stats->ts.iStart, stats->ts.iEnd,
 	   outbuffer, outbufferext,
 	   stats->cntError, stats->cntDatagrams,
-	   (100.0 * stats->cntError) / stats->cntDatagrams);
+	   (stats->cntDatagrams ? (100.0 * stats->cntError) / stats->cntDatagrams : 0.0));
     if (stats->cntOutofOrder > 0) {
 	printf(report_sum_outoforder,
 	       stats->ts.iStart,
@@ -708,7 +709,7 @@ void udp_output_sumcnt_read_enhanced (struct TransferInfo *stats) {
 	   stats->ts.iStart, stats->ts.iEnd,
 	   outbuffer, outbufferext,
 	   stats->jitter*1000.0, stats->cntError, stats->cntDatagrams,
-	   (100.0 * stats->cntError) / stats->cntDatagrams);
+	   (stats->cntDatagrams ? (100.0 * stats->cntError) / stats->cntDatagrams : 0.0));
     if (stats->cntOutofOrder > 0) {
 	if (isSumOnly(stats->common)) {
 	    printf(report_sumcnt_outoforder,
@@ -950,7 +951,8 @@ void udp_output_basic_csv (struct TransferInfo *stats) {
 	    stats->jitter*1000.0,
 	    stats->cntError,
 	    stats->cntDatagrams,
-	    (100.0 * stats->cntError) / stats->cntDatagrams, stats->cntOutofOrder );
+	    (stats->cntDatagrams ? (100.0 * stats->cntError) / stats->cntDatagrams : 0.0),
+	    stats->cntOutofOrder);
 }
 void tcp_output_basic_csv (struct TransferInfo *stats) {
     format_timestamp(&stats->ts.nextTime, isEnhanced(stats->common));
@@ -1040,12 +1042,29 @@ static void reporter_output_listener_settings (struct ReportSettings *report) {
     if (isTunDev(report->common) || isTapDev(report->common)) {
 	printf(bind_address_iface_taptun, report->common->Ifrname);
     }
+#ifdef __QNX__
+    if (isUDP(report->common) && !isIsochronous(report->common)) {
+        if (isRcvMMsgs(report->common)) {
+            if(isRcvMMsgsTime(report->common)) {
+                printf(recv_mm_conf, report->common->mmnum,report->common->wait_mode,report->common->wait_nsec/1000000);
+            }
+            else {
+                printf(recv_mm_conf_no_timeout, report->common->mmnum,report->common->wait_mode);
+            }
+        }
+    }
+#endif /* __QNX__ */
     if (isEnhanced(report->common)) {
 	byte_snprintf(outbuffer, sizeof(outbuffer), report->common->BufLen, toupper((int)report->common->Format));
 	byte_snprintf(outbufferext, sizeof(outbufferext), report->common->BufLen / 8, 'A');
 	outbuffer[(sizeof(outbuffer)-1)] = '\0';
 	outbufferext[(sizeof(outbufferext)-1)] = '\0';
 	printf("%s: %s (Dist bin width=%s)\n", server_read_size, outbuffer, outbufferext);
+#ifdef __QNX__
+	byte_snprintf( outbufferext2, sizeof(outbufferext2), *report->common->recvlowat, toupper((int)report->common->Format));
+	outbufferext2[(sizeof(outbufferext2)-1)] = '\0';
+	printf("%s: %s\n", recv_lowat_conf, outbufferext2);
+#endif /* __QNX__ */
     }
     if (isCongestionControl(report->common) && report->common->Congestion) {
 	fprintf(stdout, "TCP congestion control set to %s\n", report->common->Congestion);
@@ -1142,6 +1161,13 @@ static void reporter_output_client_settings (struct ReportSettings *report) {
         printf(client_datagram_size, report->common->BufLen, report->common->pktIPG);
 #endif
     }
+#ifdef __QNX__
+    if (isUDP(report->common) && !isIsochronous(report->common)) {
+        if (isSndMMsgs(report->common)) {
+            printf(send_mm_conf, report->common->mmnum);
+        }
+    }
+#endif /* __QNX__*/
     if (isConnectOnly(report->common)) {
 	fprintf(stdout, "TCP three-way-handshake (3WHS) only\n");
     } else {

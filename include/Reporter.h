@@ -243,6 +243,12 @@ struct ReportCommon {
     double rtt_weight;
     double ListenerTimeout;
     double FPS;
+#ifdef __QNX__
+    enum WaitMode wait_mode;
+    int mmnum;
+    int wait_nsec;
+    int* recvlowat; //point to either the setting value or 'BufLen' (-l)
+#endif /* __QNX__ */
 #ifdef HAVE_STRUCT_TCP_INFO_TCPI_TOTAL_RETRANS
     bool enable_sampleTCPstats;
     bool intervalonly_sampleTCPstats;

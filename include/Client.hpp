@@ -85,7 +85,7 @@ public:
     struct ReportHeader *myJob;
 
 private:
-    inline void WritePacketID(intmax_t);
+    inline void WritePacketID(intmax_t, struct UDP_datagram * mBuf_UDP);
     inline void WriteTcpTxHdr(struct ReportStruct *, int, int);
     inline double get_delay_target(void);
     void InitTrafficLoop(void);
@@ -122,6 +122,10 @@ private:
     void RunUDPIsochronous(void);
     // UDP plain
     void RunUDP(void);
+#ifdef __QNX__
+    // UDP traffic in bursts using sendmmsg
+    void RunUDPBurst(void);
+#endif /* __QNX__ */
     // client connect
     void PeerXchange(void);
     thread_Settings *mSettings;

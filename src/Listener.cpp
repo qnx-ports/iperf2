@@ -994,14 +994,21 @@ int Listener::my_accept (thread_Settings *server) {
 	}
 	// note udp_accept will update the active host table
     } else {
-	// accept a TCP  connection
-	server->mSock = accept(ListenSocket, reinterpret_cast<sockaddr*>(&server->peer), &server->size_peer);
-	if (server->mSock > 0) {
-	    server->size_local = sizeof(iperf_sockaddr);
-	    getsockname(server->mSock, reinterpret_cast<sockaddr*>(&server->local), &server->size_local);
-	    SockAddr_Ifrname(server);
-	    Iperf_push_host(server);
-	}
+        // accept a TCP  connection
+        server->mSock = accept(ListenSocket, reinterpret_cast<sockaddr*>(&server->peer), &server->size_peer);
+        if (server->mSock > 0) {
+            server->size_local = sizeof(iperf_sockaddr);
+            getsockname(server->mSock, reinterpret_cast<sockaddr*>(&server->local), &server->size_local);
+            SockAddr_Ifrname(server);
+            Iperf_push_host(server);
+        }
+#ifdef __QNX__
+        if (server->mSock != INVALID_SOCKET) {
+            if (setsockopt(server->mSock, SOL_SOCKET, SO_RCVLOWAT, mSettings->recvlowat, sizeof(*mSettings->recvlowat)) != 0) {
+                WARN(1, "Failed setting recv low-water mark for the socket");
+            }
+        }
+#endif /* __QNX__ */
     }
     if (server->mSock > 0) {
 	Timestamp now;

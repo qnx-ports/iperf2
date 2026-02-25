@@ -82,6 +82,9 @@ private:
 
     void InitKernelTimeStamping(void);
     bool InitTrafficLoop(void);
+#ifdef __QNX__
+    ssize_t recvmulti(int, void *,  size_t, int );
+#endif /* __QNX__ */
     inline void SetFullDuplexReportStartTime(void);
     inline void SetReportStartTime();
     int ReadWithRxTimestamp(void);
@@ -111,18 +114,28 @@ private:
     struct sockaddr_storage srcaddr;
     struct iovec iov[1];
     struct msghdr message;
-#ifndef __QNXNTO__
-    char ctrl[CMSG_SPACE(sizeof(struct timeval))];
-#else /* !__QNXNTO__ */
+#ifdef __QNX__
     char *ctrl;
-#endif /* __QNXNTO__ */
+#else
+    char ctrl[CMSG_SPACE(sizeof(struct timeval))];
+#endif /* __QNX__ */
     struct cmsghdr *cmsg;
 #endif
+
 #if defined(HAVE_LINUX_FILTER_H) && defined(HAVE_AF_PACKET)
     struct ether_header *eth_hdr;
     struct iphdr *ip_hdr;
     struct udphdr *udp_hdr;
 #endif
+#ifdef __QNX__
+    char* mBuf_curr;
+    bool init_buf_idx;
+    bool initialized_mm;
+    int nextindex;
+    struct mmsghdr *msghdr;
+    struct iovec *iovmm;
+    int count;
+#endif /* __QNX__ */
 }; // end class Server
 
 #endif // SERVER_H
