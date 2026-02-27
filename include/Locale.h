@@ -147,6 +147,16 @@ extern const char client_bounceback_noqack[];
 extern const char server_burstperiod[];
 
 extern const char client_fq_pacing[];
+
+#ifdef __QNX__
+extern const char send_mm_conf[];
+
+extern const char recv_mm_conf[];
+
+extern const char recv_mm_conf_no_timeout[];
+
+extern const char recv_lowat_conf[];
+#endif /* __QNX__ */
 /* -------------------------------------------------------------------
  * Legacy reports
  * ------------------------------------------------------------------- */

@@ -554,6 +554,10 @@ void Client::Run () {
 	// Launch the approprate UDP traffic loop
 	if (isIsochronous(mSettings)) {
 	    RunUDPIsochronous();
+#ifdef __QNX__
+	} else if (isSndMMsgs(mSettings)) {
+	    RunUDPBurst();
+#endif /* __QNX__ */
 	} else {
 	    RunUDP();
 	}
@@ -1157,6 +1161,184 @@ double Client::get_delay_target () {
     return delay_target;
 }
 
+#ifdef __QNX__
+void Client::RunUDPBurst(void) {
+	int currMsg=0;
+	int msg_len;
+	struct iovec *iov;
+	struct mmsghdr *mmsg;
+	char*  mBuf;
+	struct UDP_datagram* mBuf_UDP = NULL;
+	int vlen;
+	double delay_target = get_delay_target();
+	double delay = 0;
+	double adjust = 0;
+	int i=0;
+
+	delay_target *= mSettings->mmnum;
+
+	double variance = mSettings->mVariance;
+
+	// Size of one message
+	if (!isModeTime(mSettings)) {
+		msg_len = (mSettings->mAmount < static_cast<unsigned>(mSettings->mBufLen)) ? mSettings->mAmount : mSettings->mBufLen;
+	} else {
+		msg_len = mSettings->mBufLen;
+	}
+	//msg_len = mSettings->mBufLen;
+	// Number of messages in one burst
+	vlen = mSettings->mmnum;
+
+	// Allocate temporary mBuf with enough space for all messages in a burst
+	mBuf = (char*) malloc( vlen * msg_len);
+	if (mBuf == NULL) {
+		FAIL_errno(errno, "Out of memory", mSettings);
+	}
+
+	for(i=0;i<vlen;i++)
+		memcpy(mBuf + i*msg_len, mSettings->mBuf, mSettings->mBufLen);
+
+	// Allocate temporary mBuf with enough space for all messages in a burst
+	iov = (struct iovec *) calloc(vlen, sizeof(struct iovec));
+	if (iov == NULL) {
+		free(mBuf);
+		FAIL_errno(errno, "Out of memory", mSettings);
+	}
+
+	// Allocate buffer for multi message header array
+	mmsg = (struct mmsghdr *) calloc(vlen, sizeof(struct mmsghdr));
+	if (mmsg == NULL) {
+		free(iov);
+		free(mBuf);
+		FAIL_errno(errno, "Out of memory", mSettings);
+	}
+
+	while (InProgress()) {
+		// Test case: drop 17 packets and send 2 out-of-order:
+		// sequence 51, 52, 70, 53, 54, 71, 72
+		//switch(datagramID) {
+		//  case 53: datagramID = 70; break;
+		//  case 71: datagramID = 53; break;
+		//  case 55: datagramID = 71; break;
+		//  default: break;
+		//}
+
+		for (int m = 0; m < vlen; m++) {
+
+			iov[m].iov_base = mBuf + (m * msg_len);
+			iov[m].iov_len  = msg_len;
+
+			mmsg[m].msg_hdr.msg_name = NULL;
+			mmsg[m].msg_hdr.msg_namelen = 0;
+			mmsg[m].msg_hdr.msg_iov = &iov[m];
+			mmsg[m].msg_hdr.msg_iovlen = 1;
+			mmsg[m].msg_hdr.msg_control = NULL;
+			mmsg[m].msg_hdr.msg_controllen = 0;
+
+			now.setnow();
+			reportstruct->packetTime.tv_sec = now.getSecs();
+			reportstruct->packetTime.tv_usec = now.getUsecs();
+			reportstruct->sentTime = reportstruct->packetTime;
+			if (isVaryLoad(mSettings) && mSettings->mAppRateUnits == kRate_BW) {
+				static Timestamp time3;
+				if (now.subSec(time3) >= VARYLOAD_PERIOD) {
+					long var_rate = lognormal(mSettings->mAppRate,variance);
+					if (var_rate < 0)
+						var_rate = 0;
+					delay_target = (mSettings->mBufLen * ((kSecs_to_nsecs * kBytes_to_Bits) / var_rate));
+
+					time3 = now;
+				}
+			}
+			// store datagram ID into buffer
+			mBuf_UDP = reinterpret_cast<struct UDP_datagram*>(mBuf + (m*msg_len));
+			WritePacketID(reportstruct->packetID++, mBuf_UDP);
+			mBuf_UDP->tv_sec  = htonl(reportstruct->packetTime.tv_sec);
+			mBuf_UDP->tv_usec = htonl(reportstruct->packetTime.tv_usec);
+		}
+
+		// Adjustment for the running delay
+		// o measure how long the last loop iteration took
+		// o calculate the delay adjust
+		//   - If write succeeded, adjust = target IPG - the loop time
+		//   - If write failed, adjust = the loop time
+		// o then adjust the overall running delay
+		// Note: adjust units are nanoseconds,
+		//       packet timestamps are microseconds
+		adjust = delay_target + (1000.0 * lastPacketTime.subUsec(reportstruct->packetTime));
+
+		lastPacketTime.set(reportstruct->packetTime.tv_sec, reportstruct->packetTime.tv_usec);
+		// Since linux nanosleep/busyloop can exceed delay
+		// there are two possible equilibriums
+		//  1)  Try to perserve inter packet gap
+		//  2)  Try to perserve requested transmit rate
+		// The latter seems preferred, hence use a running delay
+		// that spans the life of the thread and constantly adjust.
+		// A negative delay means the iperf app is behind.
+		delay += adjust;
+		// Don't let delay grow unbounded
+		if (delay < delay_lower_bounds) {
+			delay = delay_target;
+		}
+
+		reportstruct->errwrite = WriteNoErr;
+		reportstruct->emptyreport = 0;
+
+		int msgSent=0;
+
+		do {
+			// perform write
+			currMsg = sendmmsg(mSettings->mSock, &mmsg[msgSent], vlen - msgSent, 0);
+
+			if (currMsg < 0) {
+				reportstruct->packetID -= (vlen - currMsg);
+
+				if(errno == ECONNREFUSED) {
+					WARN_errno(1, "sendmmsg - connection refused");
+					goto err;
+				}
+				if (FATALUDPWRITERR(errno)) {
+					reportstruct->errwrite = WriteErrFatal;
+					WARN_errno(1, "write");
+					goto err;
+				} else {
+					reportstruct->errwrite = WriteErrAccount;
+					currMsg = 0;
+				}
+				reportstruct->emptyreport = 1;
+			}
+			// report packets
+			for (int m = msgSent; m < msgSent + currMsg; m++) {
+				reportstruct->packetLen = static_cast<unsigned long>(msg_len);
+				//reportstruct->prevPacketTime = myReport->info.ts.prevpacketTime;
+				myReportPacket();
+				//reportstruct->packetID++;
+				//myReport->info.ts.prevpacketTime = reportstruct->packetTime;
+				//ReportPacket( mSettings->reporthdr, reportstruct );
+			}
+
+			msgSent += currMsg;
+		} while( msgSent < vlen );
+#if 1
+		// Insert delay here only if the running delay is greater than 100 usec,
+		// otherwise don't delay and immediately continue with the next tx.
+		if (delay >= 1000) {
+			// Convert from nanoseconds to microseconds
+			// and invoke the microsecond delay
+			delay_loop(static_cast<unsigned long>(delay / 1000));
+		}
+#endif
+	}
+
+err:
+	FinishTrafficActions();
+
+	free(mmsg);
+	free(iov);
+	free(mBuf);
+}
+#endif /* __QNX__ */
+
 void Client::RunUDP () {
     struct UDP_datagram* mBuf_UDP = reinterpret_cast<struct UDP_datagram*>(mSettings->mBuf);
     int currLen;
@@ -1198,7 +1380,7 @@ void Client::RunUDP () {
 	    }
 	}
 	// store datagram ID into buffer
-	WritePacketID(reportstruct->packetID);
+	WritePacketID(reportstruct->packetID, mBuf_UDP);
 	mBuf_UDP->tv_sec  = htonl(reportstruct->packetTime.tv_sec);
 	mBuf_UDP->tv_usec = htonl(reportstruct->packetTime.tv_usec);
 
@@ -1326,7 +1508,7 @@ void Client::RunUDPIsochronous () {
 	    reportstruct->sentTime = reportstruct->packetTime;
 	    mBuf_UDP->tv_sec  = htonl(reportstruct->packetTime.tv_sec);
 	    mBuf_UDP->tv_usec = htonl(reportstruct->packetTime.tv_usec);
-	    WritePacketID(reportstruct->packetID);
+	    WritePacketID(reportstruct->packetID, mBuf_UDP);
 
 	    // Adjustment for the running delay
 	    // o measure how long the last loop iteration took
@@ -1425,8 +1607,7 @@ void Client::RunUDPIsochronous () {
 }
 // end RunUDPIsoch
 
-inline void Client::WritePacketID (intmax_t packetID) {
-    struct UDP_datagram * mBuf_UDP = reinterpret_cast<struct UDP_datagram *>(mSettings->mBuf);
+inline void Client::WritePacketID (intmax_t packetID, struct UDP_datagram * mBuf_UDP) {
     // store datagram ID into buffer
 #ifdef HAVE_INT64_T
     // Pack signed 64bit packetID into unsigned 32bit id1 + unsigned
@@ -1579,8 +1760,8 @@ void Client::FinishTrafficActions () {
 	// Don't count in the mTotalLen. The server counts this one,
 	// but didn't count our first datagram, so we're even now.
 	// The negative datagram ID signifies termination to the server.
-	WritePacketID(-reportstruct->packetID);
 	struct UDP_datagram * mBuf_UDP = reinterpret_cast<struct UDP_datagram *>(mSettings->mBuf);
+	WritePacketID(-reportstruct->packetID, mBuf_UDP);
 	mBuf_UDP->tv_sec = htonl(reportstruct->packetTime.tv_sec);
 	mBuf_UDP->tv_usec = htonl(reportstruct->packetTime.tv_usec);
 	int len = write(mySocket, mSettings->mBuf, mSettings->mBufLen);
@@ -1643,7 +1824,8 @@ void Client::AwaitServerFinPacket () {
         // rc= zero means select's read timed out
 	if (rc == 0) {
 	    // try to trigger another FIN by resending a negative seq no
-	    WritePacketID(-(++reportstruct->packetID));
+	    struct UDP_datagram* mBuf_UDP = reinterpret_cast<struct UDP_datagram*>(mSettings->mBuf);
+	    WritePacketID(-(++reportstruct->packetID), mBuf_UDP);
 	    // write data
 	    rc = write(mySocket, mSettings->mBuf, mSettings->mBufLen);
 	    WARN_errno(rc < 0, "write-fin");
@@ -1754,10 +1936,10 @@ int Client::SendFirstPayload () {
 	}
 	if (pktlen > 0) {
 	    if (isUDP(mSettings)) {
-		struct client_udp_testhdr *tmphdr = reinterpret_cast<struct client_udp_testhdr *>(mSettings->mBuf);
-		WritePacketID(reportstruct->packetID);
-		tmphdr->seqno_ts.tv_sec  = htonl(reportstruct->packetTime.tv_sec);
-		tmphdr->seqno_ts.tv_usec = htonl(reportstruct->packetTime.tv_usec);
+		struct UDP_datagram * mBuf_UDP = reinterpret_cast<struct UDP_datagram *>(mSettings->mBuf);
+		WritePacketID(reportstruct->packetID, mBuf_UDP);
+		mBuf_UDP->tv_sec  = htonl(reportstruct->packetTime.tv_sec);
+		mBuf_UDP->tv_usec = htonl(reportstruct->packetTime.tv_usec);
 		udp_payload_minimum = pktlen;
 #if HAVE_DECL_MSG_DONTWAIT
 		pktlen = send(mySocket, mSettings->mBuf, (pktlen > mSettings->mBufLen) ? pktlen : mSettings->mBufLen, MSG_DONTWAIT);
