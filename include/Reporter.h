@@ -230,6 +230,12 @@ struct ReportCommon {
     double FPS;
     int bbsize;
     int bbhold;
+#ifdef __QNX__
+    enum WaitMode wait_mode;
+    int mmnum;
+    int wait_nsec;
+    int* recvlowat; //point to either the setting value or 'BufLen' (-l)
+#endif /* __QNX__ */
 #if WIN32
     SOCKET socket;
 #else

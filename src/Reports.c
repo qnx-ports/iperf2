@@ -136,6 +136,12 @@ static void common_copy (struct ReportCommon **common, struct thread_Settings *i
     (*common)->RTOS = inSettings->mRTOS;
     (*common)->bbsize = inSettings->mBounceBackBytes;
     (*common)->bbhold = inSettings->mBounceBackHold;
+#ifdef __QNX__
+    (*common)->mmnum = inSettings->mmnum;
+    (*common)->wait_mode = inSettings->wait_mode;
+    (*common)->wait_nsec = inSettings->wait_nsec;
+    (*common)->recvlowat = inSettings->recvlowat;
+#endif /* __QNX__ */
 #if HAVE_DECL_TCP_WINDOW_CLAMP
     (*common)->ClampSize = inSettings->mClampSize;
 #endif

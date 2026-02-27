@@ -139,6 +139,14 @@ enum RateUnits {
     kRate_PPS
 };
 
+#ifdef __QNX__
+// wait mode for QNX recv-mmsg/send-mmsg extension
+enum WaitMode {
+    WaitForOne = 0,
+    WaitAll
+};
+#endif /* __QNX__ */
+
 #include "Reporter.h"
 #include "payloads.h"
 
@@ -294,6 +302,12 @@ struct thread_Settings {
 #if HAVE_DECL_TCP_NOTSENT_LOWAT
     int mWritePrefetch;
 #endif
+#ifdef __QNX__
+    enum WaitMode wait_mode;
+    int mmnum;
+    int wait_nsec;
+    int* recvlowat; //point to either the setting value or 'mBufLen' (-l)
+#endif /* __QNX__ */
 };
 
 /*
@@ -390,6 +404,17 @@ struct thread_Settings {
 #define FLAG_CONGEST        0x00002000
 #define FLAG_DOMAINV4       0x00004000
 
+#ifdef __QNX__
+/*
+ * QNX flags
+ */
+#define FLAG_SNDMMSGS       0x01000000
+#define FLAG_RCVMMSGS       0x02000000
+#define FLAG_RCVMMSGSWAITALL 0x04000000
+#define FLAG_RCVMMSGSTIME   0x08000000
+#define FLAG_RCVLOWAT       0x10000000
+#endif /* __QNX__ */
+
 #define isBuflenSet(settings)      ((settings->flags & FLAG_BUFLENSET) != 0)
 #define isCompat(settings)         ((settings->flags & FLAG_COMPAT) != 0)
 #define isDaemon(settings)         ((settings->flags & FLAG_DAEMON) != 0)
@@ -464,6 +489,13 @@ struct thread_Settings {
 #define isOverrideTOS(settings)    ((settings->flags_extend2 & FLAG_OVERRIDETOS) != 0)
 #define isTcpQuickAck(settings)    ((settings->flags_extend2 & FLAG_TCPQUICKACK) != 0)
 #define isCongest(settings)        ((settings->flags_extend2 & FLAG_CONGEST) != 0)
+#ifdef __QNX__
+#define isSndMMsgs(settings)          ((settings->flags_extend2 & FLAG_SNDMMSGS) != 0)
+#define isRcvMMsgs(settings)          ((settings->flags_extend2 & FLAG_RCVMMSGS) != 0)
+#define isRcvMMsgsWaitAll(settings)   ((settings->flags_extend2 & FLAG_RCVMMSGSWAITALL) != 0)
+#define isRcvMMsgsTime(settings)      ((settings->flags_extend2 & FLAG_RCVMMSGSTIME) != 0)
+#define isRcvLowat(settings)      ((settings->flags_extend2 & FLAG_RCVLOWAT) != 0)
+#endif /* __QNX__ */
 
 #define setBuflenSet(settings)     settings->flags |= FLAG_BUFLENSET
 #define setCompat(settings)        settings->flags |= FLAG_COMPAT
@@ -536,6 +568,13 @@ struct thread_Settings {
 #define setOverrideTOS(settings)   settings->flags_extend2 |= FLAG_OVERRIDETOS
 #define setTcpQuickAck(settings)   settings->flags_extend2 |= FLAG_TCPQUICKACK
 #define setCongest(settings)       settings->flags_extend2 |= FLAG_CONGEST
+#ifdef __QNX__
+#define setSndMMsgs(settings)      settings->flags_extend2 |= FLAG_SNDMMSGS
+#define setRcvMMsgs(settings)      settings->flags_extend2 |= FLAG_RCVMMSGS
+#define setRcvMMsgsWaitAll(settings) settings->flags_extend2 |= FLAG_RCVMMSGSWAITALL
+#define setRcvMMsgsTime(settings)  settings->flags_extend2 |= FLAG_RCVMMSGSTIME
+#define setRcvLowat(settings)      settings->flags_extend2 |= FLAG_RCVLOWAT
+#endif /* __QNX__ */
 
 #define unsetBuflenSet(settings)   settings->flags &= ~FLAG_BUFLENSET
 #define unsetCompat(settings)      settings->flags &= ~FLAG_COMPAT
@@ -607,6 +646,13 @@ struct thread_Settings {
 #define unsetOverrideTOS(settings)   settings->flags_extend2 &= ~FLAG_OVERRIDETOS
 #define unsetTcpQuickAck(settings)   settings->flags_extend2 &= ~FLAG_TCPQUICKACK
 #define unsetCongest(settings)       settings->flags_extend2 &= ~FLAG_CONGEST
+#ifdef __QNX__
+#define unsetSndMMsgs(settings)      settings->flags_extend2 &= ~FLAG_SNDMMSGS
+#define unsetRcvMMsgs(settings)      settings->flags_extend2 &= ~FLAG_RCVMMSGS
+#define unsetRcvMMsgsWaitAll(settings) settings->flags_extend2 &= ~FLAG_RCVMMSGSWAITALL
+#define unsetRcvMMsgsTime(settings)  settings->flags_extend2 &= ~FLAG_RCVMMSGSTIME
+#define unsetRcvLowat(settings)      settings->flags_extend2 &= ~FLAG_RCVLOWAT
+#endif /* __QNX__ */
 
 // set to defaults
 void Settings_Initialize(struct thread_Settings* main);
