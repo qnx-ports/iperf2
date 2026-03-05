@@ -99,6 +99,7 @@ static void common_copy (struct ReportCommon **common, struct thread_Settings *i
     (*common)->flags = inSettings->flags;
     (*common)->flags_extend = inSettings->flags_extend;
     (*common)->flags_extend2 = inSettings->flags_extend2;
+    (*common)->flags_extend3 = inSettings->flags_extend3;
     (*common)->ThreadMode = inSettings->mThreadMode;
     (*common)->ReportMode = inSettings->mReportMode;
     (*common)->KeyCheck = inSettings->mKeyCheck;
@@ -152,6 +153,12 @@ static void common_copy (struct ReportCommon **common, struct thread_Settings *i
     (*common)->bbhold = inSettings->mBounceBackHold;
     (*common)->bbcount = inSettings->mBounceBackBurst;
     (*common)->Omit = inSettings->mOmit;
+#ifdef __QNX__
+    (*common)->mmnum = inSettings->mmnum;
+    (*common)->wait_mode = inSettings->wait_mode;
+    (*common)->wait_nsec = inSettings->wait_nsec;
+    (*common)->recvlowat = inSettings->recvlowat;
+#endif /* __QNX__ */
 #if HAVE_DECL_TCP_WINDOW_CLAMP
     (*common)->ClampSize = inSettings->mClampSize;
 #endif

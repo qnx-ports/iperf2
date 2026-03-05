@@ -124,8 +124,14 @@ Server specific:\n\
       --tcp-rx-window-clamp set the TCP receive window clamp size in bytes\n\
       --test-exchange-timeout set the timeout on the test exchange, use 0 for no timeout\n\
       --tap-dev   #[<dev>] use TAP device to receive at L2 layer\n\
-  -t, --time      #        time in seconds to listen for new connections as well as to receive traffic (default not set)\n\
-  -B, --bind <ip>[%<dev>]  bind to multicast address and optional device\n\
+  -t, --time      #        time in seconds to listen for new connections as well as to receive traffic (default not set)\n"
+#ifdef __QNX__
+"      --recv-mmsg #        use recvmmsg() API\n\
+      --recv-mmsg-wait-all use MSG_WAITALL instead of MSG_WAITFORONE\n\
+      --recv-mmsg-time #   set timeout to wait for messages to be received in recvmmsg() API\n\
+      --recvlowat #        set the tcp socket receive low-water mark\n"
+#endif /* __QNX__ */
+"  -B, --bind <ip>[%<dev>]  bind to multicast address and optional device\n\
   -U, --single_udp         run in single threaded UDP mode\n\
       --sum-dstip          sum traffic threads based upon destination ip address (default is src ip)\n\
   -D, --daemon             run the server as a daemon\n"
@@ -165,8 +171,11 @@ Client specific:\n\
       --local-only         Set don't route on socket\n\
       --near-congestion=[w] Use a weighted write delay per the sampled TCP RTT (experimental)\n\
       --no-connect-sync    No sychronization after connect when -P or parallel traffic threads\n\
-      --no-udp-fin         No final server to client stats at end of UDP test\n\
-  -n, --num       #[kmgKMG]    number of bytes to transmit (instead of -t)\n\
+      --no-udp-fin         No final server to client stats at end of UDP test\n"
+#ifdef __QNX__
+"      --send-mmsg #        use sendmmsg() API\n"
+#endif /* __QNX__ */
+"  -n, --num       #[kmgKMG]    number of bytes to transmit (instead of -t)\n\
       --sync-transfer-id   pass the clients' transfer id(s) to the server so both will use the same id in their respective outputs\n\
   -r, --tradeoff           Do a fullduplexectional test individually\n\
       --tcp-quickack       set the socket's TCP_QUICKACK option (off by default)\n\
@@ -331,6 +340,20 @@ const char client_fq_pacing [] =
 
 const char client_fq_pacing_step [] =
 "fair-queue socket pacing set to %s/s (stepping rate by %s/s)\n";
+
+#ifdef __QNX__
+const char send_mm_conf[] =
+"Num. of send mmsg array: %d\n";
+
+const char recv_mm_conf[] =
+"Num. of recv mmsg array: %d, wait-all:%d, wait time:%dms\n";
+
+const char recv_mm_conf_no_timeout[] =
+"Num. of recv mmsg array: %d, wait-all:%d, wait time: NULL\n";
+
+const char recv_lowat_conf[] =
+"Recv low-water mark";
+#endif /* __QNX__ */
 
 /* -------------------------------------------------------------------
  * Legacy reports

@@ -722,7 +722,11 @@ struct server_hdr {
 #define SIZEOF_UDPHDRMSG_EXT (sizeof(struct client_udp_testhdr))
 #define SIZEOF_TCPHDRMSG_V1 (sizeof(struct client_hdr_v1))
 #define SIZEOF_TCPHDRMSG_EXT (sizeof(struct client_tcp_testhdr))
+#ifdef __QNX__
+#define MINMBUFALLOCSIZE (int) ((sizeof(struct client_tcp_testhdr) + TAPBYTESSLOP) > 1024 ? sizeof(struct client_tcp_testhdr) + TAPBYTESSLOP : 1024)
+#else
 #define MINMBUFALLOCSIZE (int) (sizeof(struct client_tcp_testhdr)) + TAPBYTESSLOP
+#endif /* __QNX__ */
 #define MINTRIPTIMEPAYLOAD (int) (sizeof(struct client_udp_testhdr) - sizeof(struct client_hdrext_isoch_settings))
 #ifdef __cplusplus
 } /* end extern "C" */

@@ -97,6 +97,18 @@ Server::Server (thread_Settings *inSettings) {
 #if (HAVE_DECL_SO_TIMESTAMP) && (HAVE_DECL_MSG_CTRUNC)
     ctrunc_warn_enable = true;
 #endif
+#ifdef __QNX__
+    mBuf_curr = NULL;
+    initialized_mm = false;
+    nextindex = 0;
+#endif /* __QNX__ */
+#if HAVE_DECL_SO_TIMESTAMP
+#ifdef __QNX__
+    ctrl = new char[(CMSG_SPACE(sizeof(struct timeval)) \
+           + CMSG_SPACE(sizeof(u_char)))]; // add space for rcvtos
+    FAIL_errno( ctrl == NULL, "No memory for ctrl\n", mSettings );
+#endif /* __QNX__ */
+#endif /* HAVE_DECL_SO_TIMESTAMP */
     // Enable kernel level timestamping if available
     InitKernelTimeStamping();
     int sorcvtimer = 0;
@@ -141,12 +153,82 @@ Server::~Server () {
         myDropSocket = INVALID_SOCKET;
     }
 #endif
+#if HAVE_DECL_SO_TIMESTAMP
+#ifdef __QNX__
+    delete [] ctrl;
+    ctrl = NULL;
+#endif /* __QNX__ */
+#endif /* HAVE_DECL_SO_TIMESTAMP */
 }
 
 inline bool Server::InProgress () {
     return !(sInterupted || peerclose ||
              ((isServerModeTime(mSettings) || (isModeTime(mSettings) && isReverse(mSettings))) && mEndTime.before(reportstruct->packetTime)));
 }
+
+#ifdef __QNX__
+ssize_t Server::recvmulti(int s, void *buforig,  size_t len, int flags ) {
+    int index = 0;
+    struct timespec *pts=NULL,ts;
+
+    if(isRcvMMsgsWaitAll(mSettings)) {
+        flags |= MSG_WAITALL;
+    } else {
+        flags |= MSG_WAITFORONE;
+    }
+
+    if( isRcvMMsgsTime(mSettings)) {
+        ts.tv_sec=mSettings->wait_nsec/1000000000;
+        ts.tv_nsec=mSettings->wait_nsec%1000000000;
+        pts = &ts;
+    }
+
+    if( false ==  initialized_mm) {
+        msghdr = new struct mmsghdr[mSettings->mmnum];
+        if(NULL==msghdr) {
+            printf("%s \n",strerror(errno));
+            exit(1);
+        }
+        iovmm = new struct iovec[mSettings->mmnum];
+        if(NULL == iovmm) {
+            printf("%s \n",strerror(errno));
+            exit(1);
+        }
+        initialized_mm=true;
+    }
+
+    if (init_buf_idx)
+        nextindex = 0;
+
+    index = nextindex;
+    if (index == 0) { //prepare new call
+        for (int a = 0; a < mSettings->mmnum; a++ ){
+            iovmm[a].iov_base = (char *)buforig + (a * mSettings->mBufLen);
+            iovmm[a].iov_len = mSettings->mBufLen;
+
+            msghdr[a].msg_hdr.msg_name = &srcaddr;
+            msghdr[a].msg_hdr.msg_namelen = sizeof(srcaddr);
+            msghdr[a].msg_hdr.msg_iov = &iovmm[a];
+            msghdr[a].msg_hdr.msg_iovlen = 1;
+            msghdr[a].msg_hdr.msg_control = NULL;
+            msghdr[a].msg_hdr.msg_controllen = 0;
+        }
+        count = recvmmsg(s, msghdr, mSettings->mmnum, flags, pts);
+        if (count < 1) {
+            return -1;
+        }
+    }
+
+    mBuf_curr = reinterpret_cast<char *>(iovmm[index].iov_base);
+
+    if (index == (count - 1))
+        nextindex = 0;
+    else
+        nextindex = index + 1;
+
+    return msghdr[index].msg_len;
+}
+#endif /* __QNX__ */
 
 /* -------------------------------------------------------------------
  * Receive TCP data from the (connected) socket.
@@ -499,13 +581,23 @@ void Server::InitKernelTimeStamping () {
     message.msg_namelen=sizeof(srcaddr);
 
     message.msg_control = (char *) ctrl;
+#ifdef __QNX__
+    message.msg_controllen = CMSG_SPACE(sizeof(struct timeval)) + CMSG_SPACE(sizeof(u_char)); // add space for rcvtos;
+    if(!isRcvMMsgs(mSettings)) {
+        int timestampOn = 1;
+        if (setsockopt(mSettings->mSock, SOL_SOCKET, SO_TIMESTAMP, &timestampOn, sizeof(timestampOn)) < 0) {
+            WARN_errno(mSettings->mSock == SO_TIMESTAMP, "socket");
+        }
+    }
+#else
     message.msg_controllen = sizeof(ctrl);
 
     int timestampOn = 1;
     if (setsockopt(mSettings->mSock, SOL_SOCKET, SO_TIMESTAMP, &timestampOn, sizeof(timestampOn)) < 0) {
         WARN_errno(mSettings->mSock == SO_TIMESTAMP, "socket");
     }
-#endif
+#endif /* __QNX__ */
+#endif /* HAVE_DECL_SO_TIMESTAMP */
 }
 
 //
@@ -756,6 +848,11 @@ bool Server::InitTrafficLoop (void) {
         }
         ReportPacket(myReport, reportstruct);
     }
+#ifdef __QNX__
+    if (isUDP(mSettings)) {
+        init_buf_idx=true;
+    }
+#endif /* __QNX__ */
     return UDPReady;
 }
 
@@ -765,6 +862,12 @@ inline int Server::ReadWithRxTimestamp () {
 
     reportstruct->err_readwrite = ReadSuccess;
 #if (HAVE_DECL_SO_TIMESTAMP) && (HAVE_DECL_MSG_CTRUNC)
+#ifdef __QNX__
+	if(isRcvMMsgs(mSettings)) {
+		currLen = recvmulti(mSettings->mSock, mSettings->mBuf, mSettings->mBufLen, mSettings->recvflags );
+		init_buf_idx = false;
+	} else {
+#endif /* __QNX__ */
     cmsg = reinterpret_cast<struct cmsghdr *>(&ctrl);
     currLen = recvmsg(mSettings->mSock, &message, mSettings->recvflags);
     if (currLen > 0) {
@@ -796,7 +899,10 @@ inline int Server::ReadWithRxTimestamp () {
             ctrunc_warn_enable = false;
         }
     }
-#else
+#ifdef __QNX__
+	}
+#endif /* __QNX__ */
+#else /* (HAVE_DECL_SO_TIMESTAMP) && (HAVE_DECL_MSG_CTRUNC) */
     currLen = recv(mSettings->mSock, mSettings->mBuf, mSettings->mBufLen, mSettings->recvflags);
 #endif
     // RJM clean up
@@ -831,6 +937,12 @@ inline int Server::ReadWithRxTimestamp () {
 inline bool Server::ReadPacketID (int offset_adjust) {
     bool terminate = false;
     struct UDP_datagram* mBuf_UDP  = reinterpret_cast<struct UDP_datagram*>(mSettings->mBuf + offset_adjust);
+
+#ifdef __QNX__
+    if( isRcvMMsgs(mSettings) && mBuf_curr ) {
+        mBuf_UDP = reinterpret_cast<struct UDP_datagram*>(mBuf_curr + offset_adjust);
+    }
+#endif /* __QNX__*/
     // terminate when datagram begins with negative index
     // the datagram ID should be correct, just negated
 
@@ -1081,11 +1193,22 @@ void Server::RunUDP () {
         write_UDP_AckFIN(&myReport->info, mSettings->mBufLen);
     }
     if (do_close) {
+#ifdef __QNX__
+	/*
+	 *  In case of UDP, packet(s) can be lost or delayed.
+	 *  Your issue is occurred when UDP packet(s) transfer is delayed.
+	 *  If a delayed packet from 1st test is received while 2nd
+	 *  test is running, iperf consider it as a packet for 3rd test
+	 *  and start new thread for 3rd test.
+	 *  To prevent it, just don't close socket so as new socket is not opened
+	 */
+#else
 #if HAVE_THREAD_DEBUG
         thread_debug("udp close sock=%d", mySocket);
 #endif
         int rc = close(mySocket);
         WARN_errno(rc == SOCKET_ERROR, "server close");
+#endif /* __QNX__ */
     }
     Iperf_remove_host(mSettings);
     FreeReport(myJob);

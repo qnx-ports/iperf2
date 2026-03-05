@@ -152,6 +152,14 @@ enum RateUnits {
     kRate_PPS
 };
 
+#ifdef __QNX__
+// wait mode for QNX recv-mmsg/send-mmsg extension
+enum WaitMode {
+    WaitForOne = 0,
+    WaitAll
+};
+#endif /* __QNX__ */
+
 #include "Reporter.h"
 #include "payloads.h"
 
@@ -232,6 +240,7 @@ struct thread_Settings {
     int flags;
     int flags_extend;
     int flags_extend2;
+    int flags_extend3;
     // enums (which should be special int's)
     enum ThreadMode mThreadMode;         // -s or -c
     enum ReportMode mReportMode;
@@ -330,6 +339,12 @@ struct thread_Settings {
     double connect_retry_time;    // units in seconds
     unsigned int connect_retry_timer; // units in usecs
     struct Condition receiving;
+#ifdef __QNX__
+    enum WaitMode wait_mode;
+    int mmnum;
+    int wait_nsec;
+    int* recvlowat; //point to either the setting value or 'mBufLen' (-l)
+#endif /* __QNX__ */
 };
 
 /*
@@ -440,6 +455,17 @@ struct thread_Settings {
 #define FLAG_UDPL4S          0x08000000
 #define FLAG_UDPL4SVIDEO     0x10000000
 
+#ifdef __QNX__
+/*
+ * QNX flags
+ */
+#define FLAG_SNDMMSGS       0x01000000
+#define FLAG_RCVMMSGS       0x02000000
+#define FLAG_RCVMMSGSWAITALL 0x04000000
+#define FLAG_RCVMMSGSTIME   0x08000000
+#define FLAG_RCVLOWAT       0x10000000
+#endif /* __QNX__ */
+
 #define isBuflenSet(settings)      ((settings->flags & FLAG_BUFLENSET) != 0)
 #define isCompat(settings)         ((settings->flags & FLAG_COMPAT) != 0)
 #define isDaemon(settings)         ((settings->flags & FLAG_DAEMON) != 0)
@@ -528,6 +554,13 @@ struct thread_Settings {
 #define isSkipRxCopy(settings)         ((settings->flags_extend2 & FLAG_SKIPRXCOPY) != 0)
 #define isUDPL4S(settings)         ((settings->flags_extend2 & FLAG_UDPL4S) != 0)
 #define isUDPL4SVideo(settings)    ((settings->flags_extend2 & FLAG_UDPL4SVIDEO) != 0)
+#ifdef __QNX__
+#define isSndMMsgs(settings)          ((settings->flags_extend3 & FLAG_SNDMMSGS) != 0)
+#define isRcvMMsgs(settings)          ((settings->flags_extend3 & FLAG_RCVMMSGS) != 0)
+#define isRcvMMsgsWaitAll(settings)   ((settings->flags_extend3 & FLAG_RCVMMSGSWAITALL) != 0)
+#define isRcvMMsgsTime(settings)      ((settings->flags_extend3 & FLAG_RCVMMSGSTIME) != 0)
+#define isRcvLowat(settings)      ((settings->flags_extend3 & FLAG_RCVLOWAT) != 0)
+#endif /* __QNX__ */
 
 #define setBuflenSet(settings)     settings->flags |= FLAG_BUFLENSET
 #define setCompat(settings)        settings->flags |= FLAG_COMPAT
@@ -614,6 +647,13 @@ struct thread_Settings {
 #define setSkipRxCopy(settings)     settings->flags_extend2 |= FLAG_SKIPRXCOPY
 #define setUDPL4S(settings)     settings->flags_extend2 |= FLAG_UDPL4S
 #define setUDPL4SVideo(settings)     settings->flags_extend2 |= FLAG_UDPL4SVIDEO
+#ifdef __QNX__
+#define setSndMMsgs(settings)      settings->flags_extend3 |= FLAG_SNDMMSGS
+#define setRcvMMsgs(settings)      settings->flags_extend3 |= FLAG_RCVMMSGS
+#define setRcvMMsgsWaitAll(settings) settings->flags_extend3 |= FLAG_RCVMMSGSWAITALL
+#define setRcvMMsgsTime(settings)  settings->flags_extend3 |= FLAG_RCVMMSGSTIME
+#define setRcvLowat(settings)      settings->flags_extend3 |= FLAG_RCVLOWAT
+#endif /* __QNX__ */
 
 #define unsetBuflenSet(settings)   settings->flags &= ~FLAG_BUFLENSET
 #define unsetCompat(settings)      settings->flags &= ~FLAG_COMPAT
@@ -699,6 +739,13 @@ struct thread_Settings {
 #define unsetSkipRxCopy(settings)     settings->flags_extend2 &= ~FLAG_SKIPRXCOPY
 #define unsetUDPL4S(settings)           settings->flags_extend2 &= ~FLAG_UDPL4S
 #define unsetUDPL4SVideo(settings)      settings->flags_extend2 &= ~FLAG_UDPL4SVIDEO
+#ifdef __QNX__
+#define unsetSndMMsgs(settings)      settings->flags_extend3 &= ~FLAG_SNDMMSGS
+#define unsetRcvMMsgs(settings)      settings->flags_extend3 &= ~FLAG_RCVMMSGS
+#define unsetRcvMMsgsWaitAll(settings) settings->flags_extend3 &= ~FLAG_RCVMMSGSWAITALL
+#define unsetRcvMMsgsTime(settings)  settings->flags_extend3 &= ~FLAG_RCVMMSGSTIME
+#define unsetRcvLowat(settings)      settings->flags_extend3 &= ~FLAG_RCVLOWAT
+#endif /* __QNX__ */
 
 // set to defaults
 void Settings_Initialize(struct thread_Settings* main);

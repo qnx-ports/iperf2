@@ -206,6 +206,7 @@ struct ReportCommon {
     int flags;
     int flags_extend;
     int flags_extend2;
+    int flags_extend3;
     int threads;
     int working_load_threads;
     unsigned short Port;
@@ -264,6 +265,12 @@ struct ReportCommon {
     int bbhold;
     int bbcount;
     int jitter_binwidth;
+#ifdef __QNX__
+    enum WaitMode wait_mode;
+    int mmnum;
+    int wait_nsec;
+    int* recvlowat; //point to either the setting value or 'BufLen' (-l)
+#endif /* __QNX__ */
 #if WIN32
     SOCKET socket;
 #else

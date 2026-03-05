@@ -227,6 +227,11 @@ int main(int argc, char **argv) {
 #if (((HAVE_TUNTAP_TUN) || (HAVE_TUNTAP_TAP)) && (AF_PACKET))
     mbuflen += TAPBYTESSLOP;
 #endif
+#ifdef __QNX__
+    if(isRcvMMsgs(ext_gSettings)) {
+        mbuflen = mbuflen * ext_gSettings->mmnum;
+    }
+#endif /* __QNX__ */
     ext_gSettings->mBuf = new char[mbuflen];
     memset(ext_gSettings->mBuf, 0, mbuflen);
 

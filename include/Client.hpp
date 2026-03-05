@@ -90,7 +90,7 @@ public:
     struct ReportHeader *myJob;
 
 private:
-    inline void WritePacketID(intmax_t);
+    inline void WritePacketID(intmax_t, struct UDP_datagram * mBuf_UDP);
     inline void WriteTcpTxHdr(struct ReportStruct *, int, int);
     inline void WriteTcpTxBBHdr(struct ReportStruct *, uint32_t, int);
     inline int myWrite(int inSock, const void *inBuf, int inLen);
@@ -136,6 +136,10 @@ private:
     void RunUDPL4S(void);
     int ack_poll (time_tp ack_timeout);
 #endif
+#ifdef __QNX__
+    // UDP traffic in bursts using sendmmsg
+    void RunUDPBurstMMSG(void);
+#endif /* __QNX__ */
     // client connect
     void PeerXchange(void);
     thread_Settings *mSettings;
